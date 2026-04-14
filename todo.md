@@ -34,3 +34,15 @@
 - [x] Validar visualmente a página e corrigir responsividade do formulário em linha
 - [x] Guardar checkpoint após validação final (version: 2b7fc28c)
 - [x] Redesenhar lista de intercessores: substituir tabela por cartões mobile-first com nome, horários, duração e botão de remoção claramente visíveis
+
+## Reformulação de Layout (v2)
+- [x] Melhorar contraste: texto branco/claro bem definido sobre fundo escuro, sem mistura com background
+- [x] Formulário: substituir inputs de hora livres por selectores dropdown de 30 em 30 minutos (48 opções)
+- [x] Backend: validar no servidor que não há sobreposição de horários ao registar
+- [x] Nova grelha de 48 slots entre o progresso das 24h e o formulário: verde=ocupado (com nome), laranja=livre, com scroll
+- [x] Formulário reformulado: layout mais limpo, campos bem visíveis, sem campos de hora redundantes
+- [x] Testes Vitest actualizados: 44 testes passados (100% pass rate)
+
+## Correcções Pendentes (v2.1)
+-- [x] Corrigir rodé da grelha: mostrar contagem real de slots ocupados (não participantes únicos))
+- [x] Adicionar testes tRPC para prayer.add: 48 testes passados (100% pass rate)

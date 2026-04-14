@@ -1,13 +1,11 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   minutesToTime,
-  timeToMinutes,
   slotDuration,
   uniqueMinutesCovered,
   minutesRemaining,
   coveragePercentage,
-  coverageByHour,
   formatDuration,
   type PrayerSlot,
 } from "../../../shared/prayerCalc";
@@ -27,29 +25,44 @@ function removeLocalToken(token: string) {
   localStorage.setItem(LOCAL_TOKENS_KEY, JSON.stringify(getLocalTokens().filter(x => x !== token)));
 }
 
-// ─── Cores originais ─────────────────────────────────────────────────────────
+// ─── Gera os 48 slots de 30 em 30 minutos ────────────────────────────────────
+const ALL_SLOTS_30: { label: string; minutes: number }[] = Array.from({ length: 48 }, (_, i) => {
+  const m = i * 30;
+  const h = String(Math.floor(m / 60)).padStart(2, "0");
+  const min = String(m % 60).padStart(2, "0");
+  return { label: `${h}:${min}`, minutes: m };
+});
+
+// ─── Paleta de cores com alto contraste ──────────────────────────────────────
 const C = {
-  bg:       "#0f172a",
-  surface:  "#1e293b",
-  surface2: "#263248",
-  border:   "#334155",
-  text:     "#e2e8f0",
-  muted:    "#94a3b8",
-  primary:  "#6366f1",
-  primaryL: "#818cf8",
-  success:  "#10b981",
-  warning:  "#f59e0b",
-  danger:   "#ef4444",
-  rose:     "#f43f5e",
-  violet:   "#8b5cf6",
-  blue:     "#3b82f6",
+  bg:        "#0a0f1e",
+  surface:   "#131929",
+  surface2:  "#1a2236",
+  border:    "#2a3a55",
+  borderHi:  "#3d5280",
+  text:      "#f0f4ff",       // branco frio — alto contraste
+  textSec:   "#c8d4f0",       // texto secundário — bem visível
+  muted:     "#7a90b8",       // labels e hints
+  primary:   "#6366f1",
+  primaryL:  "#a5b4fc",       // indigo claro — legível sobre escuro
+  success:   "#22c55e",       // verde vivo
+  successBg: "rgba(34,197,94,0.12)",
+  warning:   "#fbbf24",       // âmbar vivo
+  warningBg: "rgba(251,191,36,0.12)",
+  danger:    "#f87171",
+  blue:      "#60a5fa",       // azul claro
+  violet:    "#c084fc",       // violeta claro
+  free:      "#fbbf24",       // slot livre — laranja/âmbar
+  freeBg:    "rgba(251,191,36,0.10)",
+  occupied:  "#22c55e",       // slot ocupado — verde
+  occupiedBg:"rgba(34,197,94,0.10)",
 };
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function Home() {
-  const [name, setName]           = useState("");
-  const [startTime, setStartTime] = useState("06:00");
-  const [endTime, setEndTime]     = useState("07:00");
+  const [name, setName]             = useState("");
+  const [startIdx, setStartIdx]     = useState(12);  // 06:00 por defeito
+  const [endIdx, setEndIdx]         = useState(14);  // 07:00 por defeito
   const [localTokens, setLocalTokens] = useState<string[]>(getLocalTokens);
   const [celebrated, setCelebrated]   = useState(false);
   const [removing, setRemoving]       = useState<string | null>(null);
@@ -64,12 +77,27 @@ export default function Home() {
   const remaining     = useMemo(() => minutesRemaining(slots), [slots]);
   const percentage    = useMemo(() => coveragePercentage(slots), [slots]);
   const totalBruto    = useMemo(() => slots.reduce((s, sl) => s + slotDuration(sl.startMinutes, sl.endMinutes), 0), [slots]);
-  const hourCounts    = useMemo(() => coverageByHour(slots), [slots]);
-  const hourCoverage  = useMemo(() =>
-    hourCounts.map((count, hour) => ({ hour, count, covered: count > 0 })),
-    [hourCounts]
-  );
-  const maxHourCount  = useMemo(() => Math.max(1, ...hourCounts), [hourCounts]);
+
+  // ─── Mapa de ocupação: para cada slot de 30min, quem está a orar ─────────────
+  const occupancyMap = useMemo(() => {
+    const map = new Map<number, PrayerSlot[]>();
+    ALL_SLOTS_30.forEach(s => map.set(s.minutes, []));
+    for (const slot of slots) {
+      let cur = slot.startMinutes;
+      while (cur !== slot.endMinutes) {
+        const list = map.get(cur) ?? [];
+        list.push(slot);
+        map.set(cur, list);
+        cur = (cur + 30) % 1440;
+      }
+    }
+    return map;
+  }, [slots]);
+
+  // ─── Slots de 30min disponíveis para início (não completamente ocupados) ────
+  const availableStartSlots = useMemo(() => {
+    return ALL_SLOTS_30.filter(s => (occupancyMap.get(s.minutes) ?? []).length === 0);
+  }, [occupancyMap]);
 
   useEffect(() => {
     if (percentage >= 100 && !celebrated) setCelebrated(true);
@@ -80,11 +108,13 @@ export default function Home() {
     onSuccess: ({ token }) => {
       saveLocalToken(token);
       setLocalTokens(getLocalTokens());
-      setName(""); setStartTime("06:00"); setEndTime("07:00");
+      setName("");
+      setStartIdx(12);
+      setEndIdx(14);
       refetch();
-      toast.success("Horário registado com sucesso!");
+      toast.success("Horário registado com sucesso! 🙏");
     },
-    onError: (err) => toast.error("Erro: " + err.message),
+    onError: (err) => toast.error(err.message),
   });
 
   const removeMutation = trpc.prayer.remove.useMutation({
@@ -101,12 +131,19 @@ export default function Home() {
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { toast.error("Por favor insira o seu nome."); return; }
-    addMutation.mutate({
-      name: name.trim(),
-      startMinutes: timeToMinutes(startTime),
-      endMinutes: timeToMinutes(endTime),
-    });
-  }, [name, startTime, endTime, addMutation]);
+    const startMinutes = ALL_SLOTS_30[startIdx]?.minutes ?? 0;
+    const endMinutes   = ALL_SLOTS_30[endIdx]?.minutes ?? 30;
+    if (startMinutes === endMinutes) { toast.error("O horário de início e de fim não podem ser iguais."); return; }
+    addMutation.mutate({ name: name.trim(), startMinutes, endMinutes });
+  }, [name, startIdx, endIdx, addMutation]);
+
+  // ─── Preview da duração seleccionada ────────────────────────────────────────
+  const previewDuration = useMemo(() => {
+    const s = ALL_SLOTS_30[startIdx]?.minutes ?? 0;
+    const e = ALL_SLOTS_30[endIdx]?.minutes ?? 30;
+    if (s === e) return null;
+    return { dur: slotDuration(s, e), crossesMidnight: e < s };
+  }, [startIdx, endIdx]);
 
   // ─── Exportação CSV ──────────────────────────────────────────────────────────
   const exportCSV = useCallback(() => {
@@ -131,27 +168,27 @@ export default function Home() {
       <div style={{
         textAlign: "center",
         padding: "40px 16px 32px",
-        background: "linear-gradient(180deg, rgba(99,102,241,0.12) 0%, transparent 100%)",
+        background: "linear-gradient(180deg, rgba(99,102,241,0.15) 0%, transparent 100%)",
         borderBottom: `1px solid ${C.border}`,
-        marginBottom: 28,
+        marginBottom: 24,
       }}>
-        <span style={{ fontSize: "3rem", display: "block", marginBottom: 12, animation: "pulse-heart 2s ease-in-out infinite" }}>🙏</span>
-        <h1 style={{ fontSize: "clamp(1.6rem, 5vw, 2.4rem)", fontWeight: 700, color: C.text, letterSpacing: "-0.02em", lineHeight: 1.2, fontFamily: "'Inter', sans-serif" }}>
+        <span style={{ fontSize: "3rem", display: "block", marginBottom: 12 }}>🙏</span>
+        <h1 style={{ fontSize: "clamp(1.7rem, 5vw, 2.5rem)", fontWeight: 800, color: C.text, letterSpacing: "-0.02em", lineHeight: 1.2, margin: 0 }}>
           Relógio de Oração<br />
           <span style={{ color: C.primaryL }}>pelo Geraldo</span>
         </h1>
-        <p style={{ marginTop: 10, color: C.muted, fontSize: "0.95rem", maxWidth: 560, marginLeft: "auto", marginRight: "auto" }}>
+        <p style={{ marginTop: 12, color: C.textSec, fontSize: "0.95rem", maxWidth: 560, marginLeft: "auto", marginRight: "auto" }}>
           O Geraldo sofreu um AVC e necessita urgentemente da intervenção de Deus.
           Juntos, vamos cobrir <strong style={{ color: C.text }}>24 horas contínuas de oração</strong>.
           Registe o seu nome e o horário em que vai orar.
         </p>
-        <span style={{
+        <div style={{
           marginTop: 18, display: "inline-block",
-          background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)",
-          borderRadius: 12, padding: "10px 18px", fontSize: "0.85rem", color: C.primaryL, fontStyle: "italic",
+          background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)",
+          borderRadius: 12, padding: "10px 20px", fontSize: "0.88rem", color: C.primaryL, fontStyle: "italic",
         }}>
           "A oração do justo é poderosa e eficaz." — Tiago 5:16
-        </span>
+        </div>
       </div>
 
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 16px 48px" }}>
@@ -160,13 +197,13 @@ export default function Home() {
         {celebrated && (
           <div style={{
             display: "flex", alignItems: "center", gap: 12,
-            background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.35)",
+            background: C.successBg, border: "1px solid rgba(34,197,94,0.4)",
             borderRadius: 12, padding: "16px 20px", marginBottom: 20,
           }}>
             <span style={{ fontSize: "1.6rem", flexShrink: 0 }}>✅</span>
             <div>
-              <div style={{ fontSize: "0.95rem", fontWeight: 600, color: C.success }}>Meta de 24 horas alcançada!</div>
-              <div style={{ fontSize: "0.82rem", color: "#6ee7b7", marginTop: 2 }}>
+              <div style={{ fontSize: "0.95rem", fontWeight: 700, color: C.success }}>Meta de 24 horas alcançada!</div>
+              <div style={{ fontSize: "0.82rem", color: C.textSec, marginTop: 2 }}>
                 As 24 horas de oração contínua estão cobertas. Que Deus honre cada momento de intercessão!
               </div>
             </div>
@@ -174,20 +211,19 @@ export default function Home() {
         )}
 
         {/* ── Cartões de Resumo ────────────────────────────────────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: 20 }}
-          className="stats-grid">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: 20 }}>
           {[
             { icon: "👥", value: slots.length.toString(), label: "Participantes", color: C.blue },
             { icon: "⏱️", value: formatDuration(uniqueMinutes), label: "Horas cobertas", color: C.violet },
             { icon: "⏳", value: remaining > 0 ? formatDuration(remaining) : "Completo!", label: "Tempo restante", color: C.warning },
-            { icon: "❤️", value: `${percentage}%`, label: "Progresso", color: C.rose },
+            { icon: "❤️", value: `${percentage}%`, label: "Progresso", color: "#f87171" },
           ].map((card) => (
-            <div key={card.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 }}>
-              <div style={{ fontSize: "1.4rem", marginBottom: 8 }}>{card.icon}</div>
-              <div style={{ fontFamily: "'JetBrains Mono', 'Courier New', monospace", fontSize: "1.4rem", fontWeight: 700, lineHeight: 1, color: card.color }}>
+            <div key={card.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 14px" }}>
+              <div style={{ fontSize: "1.4rem", marginBottom: 6 }}>{card.icon}</div>
+              <div style={{ fontFamily: "'JetBrains Mono', 'Courier New', monospace", fontSize: "1.5rem", fontWeight: 700, lineHeight: 1, color: card.color }}>
                 {card.value}
               </div>
-              <div style={{ fontSize: "0.72rem", color: C.muted, marginTop: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              <div style={{ fontSize: "0.72rem", color: C.muted, marginTop: 5, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>
                 {card.label}
               </div>
             </div>
@@ -196,106 +232,247 @@ export default function Home() {
 
         {/* ── Barra de Progresso ──────────────────────────────────────────── */}
         <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20, marginBottom: 20 }}>
-          <div style={{ fontSize: "0.9rem", fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14, display: "flex", alignItems: "center", gap: 8, fontFamily: "'Inter', sans-serif" }}>
+          <div style={{ fontSize: "0.82rem", fontWeight: 700, color: C.textSec, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
             ✨ Progresso das 24 Horas de Oração
           </div>
-          <div style={{ background: C.surface2, borderRadius: 99, height: 18, overflow: "hidden", position: "relative" }}>
+          <div style={{ background: C.surface2, borderRadius: 99, height: 20, overflow: "hidden", border: `1px solid ${C.border}` }}>
             <div style={{
               height: "100%", borderRadius: 99,
               background: percentage >= 100
-                ? `linear-gradient(90deg, ${C.success} 0%, #34d399 100%)`
+                ? `linear-gradient(90deg, ${C.success} 0%, #4ade80 100%)`
                 : `linear-gradient(90deg, ${C.primary} 0%, ${C.primaryL} 100%)`,
               width: `${Math.min(percentage, 100)}%`,
               transition: "width 0.6s cubic-bezier(0.4,0,0.2,1)",
               minWidth: 0,
             }} />
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: "0.75rem", color: C.muted }}>
-            <span>0h</span>
-            <span style={{ fontWeight: 600, color: C.text }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: "0.78rem", color: C.textSec, fontWeight: 500 }}>
+            <span style={{ color: C.muted }}>0h</span>
+            <span style={{ fontWeight: 700, color: C.text }}>
               {formatDuration(uniqueMinutes)} cobertos de 24h
             </span>
-            <span>24h</span>
+            <span style={{ color: C.muted }}>24h</span>
           </div>
           <div style={{ position: "relative", height: 20, marginTop: 4 }}>
             {[{ pct: 25, label: "6h" }, { pct: 50, label: "12h" }, { pct: 75, label: "18h" }].map(({ pct, label }) => (
               <div key={label} style={{ position: "absolute", left: `${pct}%`, transform: "translateX(-50%)", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <div style={{ width: 1, height: 6, background: C.border }} />
+                <div style={{ width: 1, height: 6, background: C.borderHi }} />
                 <span style={{ fontSize: "0.65rem", color: C.muted, marginTop: 2 }}>{label}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* ── Formulário ──────────────────────────────────────────────────── */}
+        {/* ── Grelha de 48 Slots ──────────────────────────────────────────── */}
         <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20, marginBottom: 20 }}>
-          <div style={{ fontSize: "0.9rem", fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16, display: "flex", alignItems: "center", gap: 8, fontFamily: "'Inter', sans-serif" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: "0.82rem", fontWeight: 700, color: C.textSec, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              📋 Horários do Dia — 48 Slots de 30 min
+            </div>
+            <div style={{ display: "flex", gap: 12, fontSize: "0.72rem", color: C.muted, flexWrap: "wrap" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: C.occupied, display: "inline-block" }} />
+                <span style={{ color: C.textSec }}>Ocupado</span>
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: C.free, display: "inline-block" }} />
+                <span style={{ color: C.textSec }}>Livre</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Lista com scroll */}
+          <div style={{ maxHeight: 320, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4,
+            scrollbarWidth: "thin", scrollbarColor: `${C.borderHi} ${C.surface2}` }}>
+            {ALL_SLOTS_30.map((slot, i) => {
+              const nextSlot = ALL_SLOTS_30[(i + 1) % 48];
+              const endMinutes = nextSlot?.minutes ?? 0;
+              const occupants = occupancyMap.get(slot.minutes) ?? [];
+              const isOccupied = occupants.length > 0;
+              return (
+                <div key={slot.minutes} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "8px 12px", borderRadius: 8,
+                  background: isOccupied ? C.occupiedBg : C.freeBg,
+                  border: `1px solid ${isOccupied ? "rgba(34,197,94,0.25)" : "rgba(251,191,36,0.2)"}`,
+                  transition: "all 0.15s",
+                }}>
+                  {/* Indicador de cor */}
+                  <div style={{
+                    width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                    background: isOccupied ? C.occupied : C.free,
+                    boxShadow: isOccupied ? `0 0 6px ${C.occupied}` : `0 0 6px ${C.free}`,
+                  }} />
+                  {/* Horário */}
+                  <span style={{
+                    fontFamily: "'JetBrains Mono', 'Courier New', monospace",
+                    fontSize: "0.88rem", fontWeight: 700,
+                    color: isOccupied ? C.success : C.warning,
+                    minWidth: 110, flexShrink: 0,
+                  }}>
+                    {slot.label} → {minutesToTime(endMinutes)}
+                  </span>
+                  {/* Nome(s) ou "Livre" */}
+                  <span style={{
+                    flex: 1, fontSize: "0.85rem",
+                    color: isOccupied ? C.textSec : C.muted,
+                    fontWeight: isOccupied ? 600 : 400,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {isOccupied
+                      ? occupants.map(o => o.name).join(", ")
+                      : "Livre — clique em Registar para reservar"}
+                  </span>
+                  {/* Badge */}
+                  <span style={{
+                    flexShrink: 0, fontSize: "0.65rem", fontWeight: 700, padding: "2px 8px",
+                    borderRadius: 99, textTransform: "uppercase", letterSpacing: "0.05em",
+                    background: isOccupied ? "rgba(34,197,94,0.15)" : "rgba(251,191,36,0.15)",
+                    color: isOccupied ? C.success : C.warning,
+                    border: `1px solid ${isOccupied ? "rgba(34,197,94,0.3)" : "rgba(251,191,36,0.3)"}`,
+                  }}>
+                    {isOccupied ? "✓ Ocupado" : "Livre"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Rodé da grelha */}
+          {(() => {
+            const occupiedCount = ALL_SLOTS_30.filter(s => (occupancyMap.get(s.minutes) ?? []).length > 0).length;
+            const freeCount = 48 - occupiedCount;
+            return (
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}`, display: "flex", gap: 16, flexWrap: "wrap", fontSize: "0.78rem", color: C.muted }}>
+                <span><strong style={{ color: C.success }}>{occupiedCount}</strong> de 48 slots ocupados</span>
+                <span><strong style={{ color: C.warning }}>{freeCount}</strong> slots livres</span>
+                <span style={{ marginLeft: "auto", color: C.muted }}>{Math.round((occupiedCount / 48) * 100)}% do dia coberto</span>
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* ── Formulário ──────────────────────────────────────────────────── */}
+        <div style={{ background: C.surface, border: `1px solid ${C.borderHi}`, borderRadius: 12, padding: 24, marginBottom: 20 }}>
+          <div style={{ fontSize: "0.82rem", fontWeight: 700, color: C.textSec, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 20, display: "flex", alignItems: "center", gap: 8 }}>
             ➕ Registar o Meu Horário de Oração
           </div>
           <form onSubmit={handleSubmit}>
-            <div className="form-grid-layout" style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr" }}>
-              {/* Nome */}
-              <div className="form-field-name">
-                <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: C.muted, marginBottom: 6 }}>
-                  Nome do Participante
-                </label>
-                <input
-                  type="text" value={name} onChange={e => setName(e.target.value)}
-                  placeholder="Ex: Maria Silva" maxLength={80} autoComplete="name"
-                  style={{ width: "100%", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontFamily: "'Inter', sans-serif", fontSize: "0.9rem", padding: "10px 12px", outline: "none", WebkitAppearance: "none" }}
-                  onFocus={e => { e.target.style.borderColor = C.primary; e.target.style.boxShadow = `0 0 0 3px rgba(99,102,241,0.2)`; }}
-                  onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
-                />
-              </div>
+            {/* Nome */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: C.textSec, marginBottom: 8 }}>
+                Nome do Participante
+              </label>
+              <input
+                type="text" value={name} onChange={e => setName(e.target.value)}
+                placeholder="Ex: Maria Silva" maxLength={80} autoComplete="name"
+                style={{
+                  width: "100%", background: C.surface2,
+                  border: `1.5px solid ${C.borderHi}`, borderRadius: 8,
+                  color: C.text, fontFamily: "'Inter', sans-serif",
+                  fontSize: "1rem", padding: "12px 14px", outline: "none",
+                  WebkitAppearance: "none", boxSizing: "border-box",
+                }}
+                onFocus={e => { e.target.style.borderColor = C.primary; e.target.style.boxShadow = `0 0 0 3px rgba(99,102,241,0.25)`; }}
+                onBlur={e => { e.target.style.borderColor = C.borderHi; e.target.style.boxShadow = "none"; }}
+              />
+            </div>
+
+            {/* Selectores de horário */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
               {/* Hora Início */}
-              <div className="form-field-time">
-                <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: C.muted, marginBottom: 6 }}>
-                  Hora de Início
+              <div>
+                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: C.textSec, marginBottom: 8 }}>
+                  ▶ Hora de Início
                 </label>
-                <input
-                  type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
-                  style={{ width: "100%", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontFamily: "'JetBrains Mono', 'Courier New', monospace", fontSize: "0.9rem", padding: "10px 12px", outline: "none", WebkitAppearance: "none", colorScheme: "dark" }}
-                  onFocus={e => { e.target.style.borderColor = C.primary; e.target.style.boxShadow = `0 0 0 3px rgba(99,102,241,0.2)`; }}
-                  onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
-                />
+                <select
+                  value={startIdx}
+                  onChange={e => setStartIdx(Number(e.target.value))}
+                  style={{
+                    width: "100%", background: C.surface2,
+                    border: `1.5px solid ${C.borderHi}`, borderRadius: 8,
+                    color: C.text, fontFamily: "'JetBrains Mono', 'Courier New', monospace",
+                    fontSize: "1rem", fontWeight: 700, padding: "12px 14px",
+                    outline: "none", cursor: "pointer", WebkitAppearance: "none",
+                    appearance: "none", boxSizing: "border-box",
+                  }}
+                  onFocus={e => { e.target.style.borderColor = C.blue; e.target.style.boxShadow = `0 0 0 3px rgba(96,165,250,0.2)`; }}
+                  onBlur={e => { e.target.style.borderColor = C.borderHi; e.target.style.boxShadow = "none"; }}
+                >
+                  {ALL_SLOTS_30.map((s, i) => (
+                    <option key={s.minutes} value={i} style={{ background: C.surface2, color: C.text }}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-              {/* Hora Término */}
-              <div className="form-field-time">
-                <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: C.muted, marginBottom: 6 }}>
-                  Hora de Término
+
+              {/* Hora Fim */}
+              <div>
+                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: C.textSec, marginBottom: 8 }}>
+                  ■ Hora de Término
                 </label>
-                <input
-                  type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
-                  style={{ width: "100%", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontFamily: "'JetBrains Mono', 'Courier New', monospace", fontSize: "0.9rem", padding: "10px 12px", outline: "none", WebkitAppearance: "none", colorScheme: "dark" }}
-                  onFocus={e => { e.target.style.borderColor = C.primary; e.target.style.boxShadow = `0 0 0 3px rgba(99,102,241,0.2)`; }}
-                  onBlur={e => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
-                />
-              </div>
-              {/* Botão */}
-              <div className="form-field-btn">
-                <label style={{ display: "block", fontSize: "0.72rem", opacity: 0, userSelect: "none" }}>Ação</label>
-                <button
-                  type="submit" disabled={addMutation.isPending}
-                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, background: C.primary, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "'Inter', sans-serif", fontSize: "0.9rem", fontWeight: 600, padding: "10px 18px", whiteSpace: "nowrap", transition: "all 0.15s", opacity: addMutation.isPending ? 0.6 : 1, width: "100%" }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#4f46e5"; (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)"; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = C.primary; (e.currentTarget as HTMLButtonElement).style.transform = "translateY(0)"; }}>
-                  {addMutation.isPending ? "A registar..." : "➕ Adicionar"}
-                </button>
+                <select
+                  value={endIdx}
+                  onChange={e => setEndIdx(Number(e.target.value))}
+                  style={{
+                    width: "100%", background: C.surface2,
+                    border: `1.5px solid ${C.borderHi}`, borderRadius: 8,
+                    color: C.text, fontFamily: "'JetBrains Mono', 'Courier New', monospace",
+                    fontSize: "1rem", fontWeight: 700, padding: "12px 14px",
+                    outline: "none", cursor: "pointer", WebkitAppearance: "none",
+                    appearance: "none", boxSizing: "border-box",
+                  }}
+                  onFocus={e => { e.target.style.borderColor = C.violet; e.target.style.boxShadow = `0 0 0 3px rgba(192,132,252,0.2)`; }}
+                  onBlur={e => { e.target.style.borderColor = C.borderHi; e.target.style.boxShadow = "none"; }}
+                >
+                  {ALL_SLOTS_30.map((s, i) => (
+                    <option key={s.minutes} value={i} style={{ background: C.surface2, color: C.text }}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
-            {/* Preview duração */}
-            {startTime && endTime && (
-              <p style={{ fontSize: "0.75rem", color: C.muted, marginTop: 12 }}>
-                <strong style={{ color: C.text }}>Dica:</strong> Duração:{" "}
-                <span style={{ color: C.primaryL }}>
-                  {formatDuration(slotDuration(timeToMinutes(startTime), timeToMinutes(endTime)))}
+
+            {/* Preview da duração */}
+            {previewDuration && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 10,
+                background: C.surface2, border: `1px solid ${C.border}`,
+                borderRadius: 8, padding: "10px 14px", marginBottom: 16,
+              }}>
+                <span style={{ fontSize: "0.85rem", color: C.muted }}>Duração:</span>
+                <span style={{ fontSize: "0.95rem", fontWeight: 700, color: C.primaryL }}>
+                  {formatDuration(previewDuration.dur)}
                 </span>
-                {timeToMinutes(endTime) < timeToMinutes(startTime) && (
-                  <span style={{ marginLeft: 8, color: C.blue }}>(atravessa a meia-noite)</span>
+                {previewDuration.crossesMidnight && (
+                  <span style={{ fontSize: "0.75rem", color: C.warning, marginLeft: 4 }}>
+                    🌙 atravessa a meia-noite
+                  </span>
                 )}
-                {" "}— Horários que passam da meia-noite são calculados automaticamente.
-              </p>
+                <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: C.muted }}>
+                  {ALL_SLOTS_30[startIdx]?.label} → {ALL_SLOTS_30[endIdx]?.label}
+                </span>
+              </div>
             )}
+
+            {/* Botão */}
+            <button
+              type="submit" disabled={addMutation.isPending}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                background: addMutation.isPending ? C.border : C.primary,
+                color: "#fff", border: "none", borderRadius: 10,
+                cursor: addMutation.isPending ? "not-allowed" : "pointer",
+                fontFamily: "'Inter', sans-serif", fontSize: "1rem", fontWeight: 700,
+                padding: "14px 24px", width: "100%", transition: "all 0.15s",
+                letterSpacing: "0.02em",
+              }}
+              onMouseEnter={e => { if (!addMutation.isPending) (e.currentTarget as HTMLButtonElement).style.background = "#4f46e5"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = addMutation.isPending ? C.border : C.primary; }}>
+              {addMutation.isPending ? "⏳ A registar..." : "➕ Registar o Meu Horário"}
+            </button>
           </form>
         </div>
 
@@ -303,35 +480,38 @@ export default function Home() {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 28 }}>
           <button
             onClick={exportCSV}
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer", fontFamily: "'Inter', sans-serif", fontSize: "0.9rem", fontWeight: 600, padding: "10px 18px", transition: "all 0.15s" }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = C.surface2; (e.currentTarget as HTMLButtonElement).style.color = C.text; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = C.muted; }}>
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              background: "transparent", color: C.textSec,
+              border: `1px solid ${C.border}`, borderRadius: 8,
+              cursor: "pointer", fontFamily: "'Inter', sans-serif",
+              fontSize: "0.9rem", fontWeight: 600, padding: "10px 18px", transition: "all 0.15s",
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = C.surface2; (e.currentTarget as HTMLButtonElement).style.borderColor = C.borderHi; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.borderColor = C.border; }}>
             ⬇️ Exportar CSV
           </button>
         </div>
 
-        {/* ── Lista de Participantes (Cartões Mobile-First) ────────────── */}
+        {/* ── Lista de Intercessores ──────────────────────────────────────── */}
         <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20, marginBottom: 20 }}>
-          {/* Cabeçalho */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontSize: "0.9rem", fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ fontSize: "0.82rem", fontWeight: 700, color: C.textSec, textTransform: "uppercase", letterSpacing: "0.07em" }}>
               👥 Lista de Intercessores
             </div>
-            <span style={{ display: "inline-flex", alignItems: "center", fontSize: "0.72rem", fontWeight: 600, padding: "3px 10px", borderRadius: 99, background: "rgba(59,130,246,0.12)", color: C.blue, border: "1px solid rgba(59,130,246,0.25)" }}>
+            <span style={{ fontSize: "0.72rem", fontWeight: 700, padding: "3px 10px", borderRadius: 99, background: "rgba(96,165,250,0.12)", color: C.blue, border: "1px solid rgba(96,165,250,0.25)" }}>
               {slots.length} participante{slots.length !== 1 ? "s" : ""}
             </span>
           </div>
 
-          {/* Estado vazio */}
           {slots.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px 16px", color: C.muted }}>
-              <div style={{ fontSize: "2.5rem", opacity: 0.3, marginBottom: 10 }}>🙏</div>
-              <p style={{ fontSize: "0.88rem" }}>Ainda não há participantes registados.</p>
-              <small style={{ fontSize: "0.78rem", opacity: 0.7 }}>Seja o primeiro a inscrever o seu horário de oração!</small>
+              <div style={{ fontSize: "2.5rem", opacity: 0.4, marginBottom: 10 }}>🙏</div>
+              <p style={{ fontSize: "0.9rem", color: C.textSec }}>Ainda não há participantes registados.</p>
+              <small style={{ fontSize: "0.78rem", color: C.muted }}>Seja o primeiro a inscrever o seu horário de oração!</small>
             </div>
           ) : (
             <>
-              {/* Cartões de participantes */}
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {slots.map((slot, i) => {
                   const isOwn = localTokens.includes(slot.token);
@@ -340,24 +520,22 @@ export default function Home() {
                   const crossesMidnight = slot.endMinutes < slot.startMinutes;
                   return (
                     <div key={slot.id} style={{
-                      background: isOwn ? "rgba(99,102,241,0.06)" : C.surface2,
-                      border: `1px solid ${isOwn ? "rgba(99,102,241,0.3)" : C.border}`,
-                      borderRadius: 10,
-                      padding: "14px 16px",
-                      transition: "border-color 0.15s",
+                      background: isOwn ? "rgba(99,102,241,0.08)" : C.surface2,
+                      border: `1px solid ${isOwn ? "rgba(99,102,241,0.35)" : C.border}`,
+                      borderRadius: 10, padding: "14px 16px",
                     }}>
-                      {/* Linha 1: Número + Nome + Badge + Botão remover */}
+                      {/* Linha 1: Número + Nome + Botão */}
                       <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
                         <span style={{
                           flexShrink: 0, width: 28, height: 28, marginTop: 1,
                           display: "inline-flex", alignItems: "center", justifyContent: "center",
-                          borderRadius: "50%", background: "rgba(99,102,241,0.15)",
+                          borderRadius: "50%", background: "rgba(99,102,241,0.18)",
                           fontSize: "0.72rem", fontWeight: 700, color: C.primaryL,
                         }}>{i + 1}</span>
-                        <span style={{ flex: 1, fontWeight: 600, fontSize: "1.05rem", color: C.text, wordBreak: "break-word", lineHeight: 1.3 }}>
+                        <span style={{ flex: 1, fontWeight: 700, fontSize: "1.05rem", color: C.text, wordBreak: "break-word", lineHeight: 1.3 }}>
                           {slot.name}
                           {isOwn && (
-                            <span style={{ marginLeft: 8, fontSize: "0.65rem", padding: "2px 7px", borderRadius: 99, background: "rgba(99,102,241,0.18)", color: C.primaryL, border: "1px solid rgba(99,102,241,0.3)", verticalAlign: "middle" }}>
+                            <span style={{ marginLeft: 8, fontSize: "0.65rem", padding: "2px 7px", borderRadius: 99, background: "rgba(99,102,241,0.2)", color: C.primaryL, border: "1px solid rgba(99,102,241,0.35)", verticalAlign: "middle" }}>
                               você
                             </span>
                           )}
@@ -366,67 +544,46 @@ export default function Home() {
                           <button
                             onClick={() => { setRemoving(slot.token); removeMutation.mutate({ token: slot.token }); }}
                             disabled={removing === slot.token}
-                            title="Remover o meu horário"
                             style={{
-                              flexShrink: 0, background: "rgba(239,68,68,0.08)",
-                              border: "1px solid rgba(239,68,68,0.25)", borderRadius: 8,
+                              flexShrink: 0, background: "rgba(248,113,113,0.1)",
+                              border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8,
                               cursor: "pointer", color: C.danger, padding: "6px 10px",
                               fontSize: "0.78rem", fontWeight: 600, transition: "all 0.15s",
                               display: "inline-flex", alignItems: "center", gap: 4,
-                              opacity: removing === slot.token ? 0.5 : 1,
-                              whiteSpace: "nowrap",
-                            }}
-                            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.18)"; }}
-                            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.08)"; }}>
-                            🗑️ <span>Remover</span>
+                              opacity: removing === slot.token ? 0.5 : 1, whiteSpace: "nowrap",
+                            }}>
+                            🗑️ Remover
                           </button>
                         )}
                       </div>
 
-                      {/* Linha 2: Blocos de horário + duração */}
+                      {/* Linha 2: Horários + Duração */}
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                        <div style={{
-                          display: "inline-flex", alignItems: "center", gap: 6,
-                          background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)",
-                          borderRadius: 8, padding: "6px 12px",
-                        }}>
-                          <span style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Início</span>
-                          <span style={{ fontFamily: "'JetBrains Mono', 'Courier New', monospace", fontSize: "1.05rem", fontWeight: 700, color: C.blue }}>
-                            {minutesToTime(slot.startMinutes)}
-                          </span>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.25)", borderRadius: 8, padding: "6px 12px" }}>
+                          <span style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase" }}>Início</span>
+                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "1rem", fontWeight: 700, color: C.blue }}>{minutesToTime(slot.startMinutes)}</span>
                         </div>
-                        <span style={{ color: C.muted, fontSize: "1rem" }}>→</span>
-                        <div style={{
-                          display: "inline-flex", alignItems: "center", gap: 6,
-                          background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.2)",
-                          borderRadius: 8, padding: "6px 12px",
-                        }}>
-                          <span style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Fim</span>
-                          <span style={{ fontFamily: "'JetBrains Mono', 'Courier New', monospace", fontSize: "1.05rem", fontWeight: 700, color: C.violet }}>
-                            {minutesToTime(slot.endMinutes)}
-                          </span>
+                        <span style={{ color: C.muted }}>→</span>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(192,132,252,0.1)", border: "1px solid rgba(192,132,252,0.25)", borderRadius: 8, padding: "6px 12px" }}>
+                          <span style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase" }}>Fim</span>
+                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "1rem", fontWeight: 700, color: C.violet }}>{minutesToTime(slot.endMinutes)}</span>
                         </div>
-                        <div style={{
-                          display: "inline-flex", alignItems: "center", gap: 4,
-                          background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)",
-                          borderRadius: 8, padding: "6px 10px",
-                        }}>
-                          <span style={{ fontSize: "0.75rem", color: C.muted }}>⏱</span>
-                          <span style={{ fontSize: "0.88rem", fontWeight: 600, color: C.success }}>{formatDuration(dur)}</span>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 8, padding: "6px 10px" }}>
+                          <span style={{ fontSize: "0.85rem", fontWeight: 700, color: C.success }}>⏱ {formatDuration(dur)}</span>
                         </div>
                         {crossesMidnight && (
-                          <span style={{ fontSize: "0.68rem", padding: "3px 8px", borderRadius: 99, background: "rgba(245,158,11,0.1)", color: C.warning, border: "1px solid rgba(245,158,11,0.25)" }}>
+                          <span style={{ fontSize: "0.68rem", padding: "3px 8px", borderRadius: 99, background: C.warningBg, color: C.warning, border: "1px solid rgba(251,191,36,0.3)" }}>
                             🌙 meia-noite
                           </span>
                         )}
                       </div>
 
-                      {/* Linha 3: Barra de cobertura */}
+                      {/* Linha 3: Barra */}
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <div style={{ flex: 1, height: 5, background: C.bg, borderRadius: 99, overflow: "hidden" }}>
-                          <div style={{ height: "100%", borderRadius: 99, background: `linear-gradient(90deg, ${C.primary}, ${C.primaryL})`, width: `${Math.min(pct, 100)}%`, transition: "width 0.4s" }} />
+                          <div style={{ height: "100%", borderRadius: 99, background: `linear-gradient(90deg, ${C.primary}, ${C.primaryL})`, width: `${Math.min(pct, 100)}%` }} />
                         </div>
-                        <span style={{ fontSize: "0.72rem", color: C.muted, minWidth: 32, textAlign: "right" }}>{pct}% do dia</span>
+                        <span style={{ fontSize: "0.72rem", color: C.muted, minWidth: 38, textAlign: "right" }}>{pct}% do dia</span>
                       </div>
                     </div>
                   );
@@ -436,12 +593,12 @@ export default function Home() {
               {/* Rodapé de totais */}
               <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div style={{ background: C.surface2, borderRadius: 8, padding: "12px 14px" }}>
-                  <div style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Total bruto</div>
+                  <div style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4, fontWeight: 700 }}>Total bruto</div>
                   <div style={{ fontSize: "1rem", fontWeight: 700, color: C.primaryL }}>{formatDuration(totalBruto)}</div>
                   <div style={{ fontSize: "0.65rem", color: C.muted, marginTop: 2 }}>com sobreposições</div>
                 </div>
-                <div style={{ background: "rgba(16,185,129,0.07)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, padding: "12px 14px" }}>
-                  <div style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Total único</div>
+                <div style={{ background: "rgba(34,197,94,0.07)", border: "1px solid rgba(34,197,94,0.2)", borderRadius: 8, padding: "12px 14px" }}>
+                  <div style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4, fontWeight: 700 }}>Total único</div>
                   <div style={{ fontSize: "1rem", fontWeight: 700, color: C.success }}>{formatDuration(uniqueMinutes)}</div>
                   <div style={{ fontSize: "0.65rem", color: C.muted, marginTop: 2 }}>sem sobreposições</div>
                 </div>
@@ -450,81 +607,14 @@ export default function Home() {
           )}
         </div>
 
-
-        {/* ── Mapa de Cobertura ────────────────────────────────────────────── */}
-        {slots.length > 0 && (
-          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20, marginBottom: 20 }}>
-            <div style={{ fontSize: "0.9rem", fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16, display: "flex", alignItems: "center", gap: 8, fontFamily: "'Inter', sans-serif" }}>
-              🕐 Mapa de Cobertura por Hora
-            </div>
-            {/* Barras */}
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 64 }}>
-              {hourCoverage.map((h) => (
-                <div
-                  key={h.hour}
-                  title={`${h.hour}:00 — ${h.count} intercessor${h.count !== 1 ? "es" : ""}`}
-                  style={{
-                    flex: 1, borderRadius: "3px 3px 0 0",
-                    background: h.covered ? C.primary : C.surface2,
-                    opacity: h.covered ? 0.75 : 1,
-                    height: h.count > 0 ? `${Math.max(8, Math.round((h.count / maxHourCount) * 64))}px` : "4px",
-                    transition: "height 0.4s ease, background 0.3s",
-                    cursor: "default",
-                    minHeight: 4,
-                  }}
-                  onMouseEnter={e => { if (h.covered) (e.currentTarget as HTMLDivElement).style.opacity = "1"; }}
-                  onMouseLeave={e => { if (h.covered) (e.currentTarget as HTMLDivElement).style.opacity = "0.75"; }}
-                />
-              ))}
-            </div>
-            {/* Eixo */}
-            <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
-              {hourCoverage.map(h => (
-                <div key={h.hour} style={{ flex: 1, textAlign: "center", fontSize: "0.6rem", color: C.muted }}>
-                  {h.hour % 6 === 0 ? `${h.hour}h` : ""}
-                </div>
-              ))}
-            </div>
-            {/* Legenda */}
-            <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: "0.75rem", color: C.muted, flexWrap: "wrap" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: 2, background: C.primary }} />
-                <span>Coberto</span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: 2, background: C.surface2 }} />
-                <span>Sem cobertura</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Footer ──────────────────────────────────────────────────────── */}
-        <div style={{ textAlign: "center", padding: "24px 16px", borderTop: `1px solid ${C.border}`, color: C.muted, fontSize: "0.8rem" }}>
-          <p>Unidos em oração pela recuperação do <strong style={{ color: C.primaryL }}>Geraldo</strong>.</p>
-          <p style={{ marginTop: 4 }}>Cada minuto de intercessão importa. Que Deus seja glorificado! 🙏</p>
+        {/* ── Rodapé ──────────────────────────────────────────────────────── */}
+        <div style={{ textAlign: "center", paddingTop: 24, borderTop: `1px solid ${C.border}`, color: C.muted, fontSize: "0.8rem" }}>
+          <p style={{ color: C.primaryL, fontStyle: "italic", marginBottom: 6 }}>
+            "A oração do justo é poderosa e eficaz." — Tiago 5:16
+          </p>
+          <p>Actualizado automaticamente a cada 30 segundos · Dados partilhados em tempo real</p>
         </div>
-
       </div>
-
-      {/* ── Animação pulse ──────────────────────────────────────────────────── */}
-      <style>{`
-        @keyframes pulse-heart {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.12); }
-        }
-        @media (min-width: 600px) {
-          .form-grid-layout {
-            grid-template-columns: 1fr 130px 130px auto !important;
-            align-items: end;
-          }
-        }
-        @media (min-width: 560px) {
-          .stats-grid {
-            grid-template-columns: repeat(4, 1fr) !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }

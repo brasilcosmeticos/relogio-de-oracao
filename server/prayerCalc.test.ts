@@ -163,11 +163,88 @@ describe("coverageByHour", () => {
   });
 });
 
-// ─── formatDuration ───────────────────────────────────────────────────────────
+/// ─── Slots de 30 em 30 minutos ─────────────────────────────────────────────
+describe("slots de 30 em 30 minutos", () => {
+  it("existem exactamente 48 slots de 30min em 24h", () => expect(1440 / 30).toBe(48));
+  it("0 é múltiplo de 30", () => expect(0 % 30).toBe(0));
+  it("360 é múltiplo de 30 (06:00)", () => expect(360 % 30).toBe(0));
+  it("1410 é múltiplo de 30 (23:30)", () => expect(1410 % 30).toBe(0));
+  it("45 NÃO é múltiplo de 30", () => expect(45 % 30).not.toBe(0));
+
+  it("slot de 30 min: 00:00 → 00:30 = 30 min", () => expect(slotDuration(0, 30)).toBe(30));
+  it("slot de 30 min atravessa meia-noite: 23:30 → 00:00 = 30 min", () => expect(slotDuration(1410, 0)).toBe(30));
+
+  it("dois slots de 30min adjacentes sem sobreposição", () => {
+    const slots = [
+      makeSlot(1, "Ana", 0, 30),
+      makeSlot(2, "João", 30, 60),
+    ];
+    expect(uniqueMinutesCovered(slots)).toBe(60);
+  });
+
+  it("dois slots de 30min idênticos — não duplica", () => {
+    const slots = [
+      makeSlot(1, "Ana", 0, 30),
+      makeSlot(2, "João", 0, 30),
+    ];
+    expect(uniqueMinutesCovered(slots)).toBe(30);
+  });
+
+  it("48 slots de 30min cobrem exactamente 24h", () => {
+    const slots = Array.from({ length: 48 }, (_, i) =>
+      makeSlot(i + 1, `P${i}`, i * 30, (i + 1) * 30 === 1440 ? 0 : (i + 1) * 30)
+    );
+    expect(uniqueMinutesCovered(slots)).toBe(1440);
+  });
+});
+
+// ─── formatDuration ─────────────────────────────────────────────────────────
 describe("formatDuration", () => {
   it("formata 0 minutos", () => expect(formatDuration(0)).toBe("0m"));
   it("formata 30 minutos", () => expect(formatDuration(30)).toBe("30m"));
   it("formata 60 minutos como 1h", () => expect(formatDuration(60)).toBe("1h"));
   it("formata 90 minutos como 1h 30m", () => expect(formatDuration(90)).toBe("1h 30m"));
   it("formata 1440 minutos como 24h", () => expect(formatDuration(1440)).toBe("24h"));
+});
+
+// ─── prayer.add — validação de sobreposição via router ───────────────────────
+import { appRouter } from "./routers";
+import type { TrpcContext } from "./_core/context";
+
+function createPublicCtx(): TrpcContext {
+  return {
+    user: null,
+    req: { protocol: "https", headers: {} } as TrpcContext["req"],
+    res: { clearCookie: () => {} } as unknown as TrpcContext["res"],
+  };
+}
+
+describe("prayer.add — validação de sobreposição", () => {
+  it("rejeita startMinutes que não é múltiplo de 30", async () => {
+    const caller = appRouter.createCaller(createPublicCtx());
+    await expect(
+      caller.prayer.add({ name: "Ana", startMinutes: 45, endMinutes: 90 })
+    ).rejects.toThrow();
+  });
+
+  it("rejeita endMinutes que não é múltiplo de 30", async () => {
+    const caller = appRouter.createCaller(createPublicCtx());
+    await expect(
+      caller.prayer.add({ name: "Ana", startMinutes: 0, endMinutes: 45 })
+    ).rejects.toThrow();
+  });
+
+  it("rejeita quando startMinutes === endMinutes", async () => {
+    const caller = appRouter.createCaller(createPublicCtx());
+    await expect(
+      caller.prayer.add({ name: "Ana", startMinutes: 60, endMinutes: 60 })
+    ).rejects.toThrow();
+  });
+
+  it("rejeita nome vazio", async () => {
+    const caller = appRouter.createCaller(createPublicCtx());
+    await expect(
+      caller.prayer.add({ name: "", startMinutes: 0, endMinutes: 30 })
+    ).rejects.toThrow();
+  });
 });
