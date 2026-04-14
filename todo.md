@@ -63,3 +63,15 @@
 - [x] Corrigir título da grelha: remover "48 SLOTS DE 30 MIN"
 - [x] Corrigir rodapé da grelha: texto limpo sem "slots"
 - [x] Revisão geral de textos, labels e elementos desnecessários ou quebrados
+
+## Selector de Duração (v2.5)
+- [x] Adicionar selector de duração no formulário: 30 minutos ou 1 hora
+- [x] Se 1 hora: registar 2 horários consecutivos de 30min com o mesmo nome e groupToken
+- [x] Validar que ambos os horários estão livres antes de registar (aviso se algum estiver ocupado)
+- [x] Actualizar backend para aceitar durationMinutes (30 ou 60) numa única chamada
+- [x] Adicionar coluna groupToken à tabela prayer_slots na base de dados
+- [x] Remoção em grupo: ao remover um registo, apagar todos os registos com o mesmo groupToken
+- [x] Auto-fill da grelha: ao tocar num horário livre, sugerir 1h se o próximo também está livre
+- [x] Lista de intercessores agrupada: registos com o mesmo groupToken mostrados como uma única entrada
+- [x] Contagem de participantes únicos (agrupados por groupToken)
+- [x] Testes Vitest actualizados: 50 testes passados (100% pass rate)

@@ -7,31 +7,6 @@ import { publicProcedure, router } from "./_core/trpc";
 import { listPrayerSlots, addPrayerSlot, removePrayerSlot } from "./db";
 import { nanoid } from "nanoid";
 
-/**
- * Verifica se dois intervalos de 30 min se sobrepõem no círculo de 24h.
- * Cada slot ocupa exatamente [start, start+30) minutos.
- */
-function slotsOverlap(
-  aStart: number, aEnd: number,
-  bStart: number, bEnd: number
-): boolean {
-  // Normaliza para array de minutos cobertos
-  const covered = (s: number, e: number): Set<number> => {
-    const set = new Set<number>();
-    let cur = s;
-    while (cur !== e) {
-      set.add(cur);
-      cur = (cur + 30) % 1440;
-    }
-    return set;
-  };
-  const setA = covered(aStart, aEnd);
-  for (const m of Array.from(covered(bStart, bEnd))) {
-    if (setA.has(m)) return true;
-  }
-  return false;
-}
-
 export const appRouter = router({
   system: systemRouter,
 
@@ -45,18 +20,17 @@ export const appRouter = router({
   }),
 
   prayer: router({
-    /**
-     * Lista todos os slots de oração ordenados por hora de início.
-     */
+    /** Lista todos os horários de oração ordenados por hora de início. */
     list: publicProcedure.query(async () => {
       return listPrayerSlots();
     }),
 
     /**
-     * Adiciona um novo slot de oração.
-     * - startMinutes e endMinutes devem ser múltiplos de 30.
-     * - Não pode haver sobreposição com slots existentes.
-     * - Retorna o token gerado para permitir remoção posterior.
+     * Adiciona um novo horário de oração.
+     * - startMinutes deve ser múltiplo de 30.
+     * - durationMinutes: 30 ou 60.
+     * - Se 60min, cria 2 registos consecutivos de 30min com o mesmo token.
+     * - Não pode haver sobreposição com horários existentes.
      */
     add: publicProcedure
       .input(
@@ -65,40 +39,70 @@ export const appRouter = router({
           startMinutes: z.number().int().min(0).max(1410).refine(v => v % 30 === 0, {
             message: "O horário deve ser múltiplo de 30 minutos",
           }),
-          endMinutes: z.number().int().min(0).max(1410).refine(v => v % 30 === 0, {
-            message: "O horário deve ser múltiplo de 30 minutos",
+          durationMinutes: z.number().int().refine(v => v === 30 || v === 60, {
+            message: "A duração deve ser 30 ou 60 minutos",
           }),
-        })
-        .refine(d => d.startMinutes !== d.endMinutes, {
-          message: "O horário de início e de fim não podem ser iguais",
         })
       )
       .mutation(async ({ input }) => {
         const existing = await listPrayerSlots();
-
-        // Verificar sobreposição com cada slot existente
+        const occupiedMinutes = new Set<number>();
         for (const slot of existing) {
-          if (slotsOverlap(input.startMinutes, input.endMinutes, slot.startMinutes, slot.endMinutes)) {
-            throw new TRPCError({
-              code: "CONFLICT",
-              message: `O horário escolhido sobrepõe-se com o de ${slot.name} (${String(Math.floor(slot.startMinutes / 60)).padStart(2, "0")}:${String(slot.startMinutes % 60).padStart(2, "0")}–${String(Math.floor(slot.endMinutes / 60)).padStart(2, "0")}:${String(slot.endMinutes % 60).padStart(2, "0")}).`,
-            });
+          let cur = slot.startMinutes;
+          while (cur !== slot.endMinutes) {
+            occupiedMinutes.add(cur);
+            cur = (cur + 30) % 1440;
           }
         }
 
-        const token = nanoid(32);
-        await addPrayerSlot({
-          name: input.name.trim(),
-          startMinutes: input.startMinutes,
-          endMinutes: input.endMinutes,
-          token,
-        });
-        return { token };
+        // Calcular os horários de 30min que serão ocupados
+        const slotsToCreate: { start: number; end: number }[] = [];
+        const numSlots = input.durationMinutes / 30;
+        let cur = input.startMinutes;
+        for (let i = 0; i < numSlots; i++) {
+          const end = (cur + 30) % 1440;
+          // Verificar se este horário está livre
+          if (occupiedMinutes.has(cur)) {
+            const h = String(Math.floor(cur / 60)).padStart(2, "0");
+            const m = String(cur % 60).padStart(2, "0");
+            const eh = String(Math.floor(end / 60)).padStart(2, "0");
+            const em = String(end % 60).padStart(2, "0");
+            // Encontrar quem ocupa este horário
+            const occupant = existing.find(s => {
+              let c = s.startMinutes;
+              while (c !== s.endMinutes) {
+                if (c === cur) return true;
+                c = (c + 30) % 1440;
+              }
+              return false;
+            });
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: `O horário ${h}:${m}–${eh}:${em} já está ocupado por ${occupant?.name ?? "outro participante"}.`,
+            });
+          }
+          slotsToCreate.push({ start: cur, end });
+          cur = end;
+        }
+
+        // Criar todos os registos com tokens individuais e groupToken partilhado
+        const groupToken = nanoid(32);
+        const tokens: string[] = [];
+        for (const s of slotsToCreate) {
+          const individualToken = nanoid(32);
+          tokens.push(individualToken);
+          await addPrayerSlot({
+            name: input.name.trim(),
+            startMinutes: s.start,
+            endMinutes: s.end,
+            token: individualToken,
+            groupToken,
+          });
+        }
+        return { token: tokens[0]!, groupToken, tokens };
       }),
 
-    /**
-     * Remove um slot de oração pelo token único.
-     */
+    /** Remove um horário de oração pelo token único (apaga todos os registos associados). */
     remove: publicProcedure
       .input(z.object({ token: z.string().min(1) }))
       .mutation(async ({ input }) => {

@@ -62,6 +62,7 @@ const C = {
 export default function Home() {
   const [name, setName]             = useState("");
   const [startIdx, setStartIdx]     = useState(12);  // 06:00 por defeito
+  const [duration, setDuration]     = useState<30 | 60>(30);
   const [localTokens, setLocalTokens] = useState<string[]>(getLocalTokens);
   const [celebrated, setCelebrated]   = useState(false);
   const [removing, setRemoving]       = useState<string | null>(null);
@@ -94,6 +95,21 @@ export default function Home() {
     return map;
   }, [slots]);
 
+  // ─── Contagem de participantes únicos (agrupados por groupToken) ───────────
+  const uniqueParticipantCount = useMemo(() => {
+    const seen = new Set<string>();
+    let count = 0;
+    for (const slot of slots) {
+      const gt = slot.groupToken ?? null;
+      if (gt) {
+        if (!seen.has(gt)) { seen.add(gt); count++; }
+      } else {
+        count++;
+      }
+    }
+    return count;
+  }, [slots]);
+
   // ─── Conjunto de horários ocupados (minutos) ───────────────────────────────
   const occupiedMinutes = useMemo(() => {
     const set = new Set<number>();
@@ -109,27 +125,48 @@ export default function Home() {
     return occupiedMinutes.has(startMin);
   }, [startIdx, occupiedMinutes]);
 
+  // Se duração = 1h, verificar se o segundo horário também está livre
+  const secondSlotOccupied = useMemo(() => {
+    if (duration !== 60) return false;
+    const startMin = ALL_SLOTS_30[startIdx]?.minutes ?? 0;
+    const secondMin = (startMin + 30) % 1440;
+    return occupiedMinutes.has(secondMin);
+  }, [startIdx, duration, occupiedMinutes]);
+
+  const anySlotOccupied = startSlotOccupied || secondSlotOccupied;
+
   useEffect(() => {
     if (percentage >= 100 && !celebrated) setCelebrated(true);
-  }, [percentage, celebrated]);
-
-  // ─── Seleccionar horário a partir da grelha ─────────────────────────────────
+  }, [percentage, celebrated]);  // ─── Seleccionar horário a partir da grelha ─────────────────────────────────────
   const selectFromGrid = useCallback((idx: number) => {
     setStartIdx(idx);
+    // Se o próximo slot também está livre, sugerir 1 hora; caso contrário, 30 min
+    const nextMin = (ALL_SLOTS_30[idx]?.minutes ?? 0) + 30;
+    const nextMinNorm = nextMin % 1440;
+    if (!occupiedMinutes.has(nextMinNorm)) {
+      setDuration(60);
+    } else {
+      setDuration(30);
+    }
     // Scroll suave até ao formulário e focar no campo nome
     setTimeout(() => {
       formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       setTimeout(() => nameInputRef.current?.focus(), 400);
     }, 50);
-  }, []);
-
-  // ─── Mutações ───────────────────────────────────────────────────────────────
+  }, [occupiedMinutes]);  // ─── Mutações ───────────────────────────────────────────────────────────────
   const addMutation = trpc.prayer.add.useMutation({
-    onSuccess: ({ token }) => {
-      saveLocalToken(token);
+    onSuccess: (data) => {
+      // Guardar todos os tokens individuais (para 1h = 2 tokens)
+      const tokens = (data as any).tokens as string[] | undefined;
+      if (tokens) {
+        tokens.forEach(t => saveLocalToken(t));
+      } else {
+        saveLocalToken(data.token);
+      }
       setLocalTokens(getLocalTokens());
       setName("");
       setStartIdx(12);
+      setDuration(30);
       refetch();
       toast.success("Horário registado com sucesso! 🙏");
     },
@@ -138,7 +175,15 @@ export default function Home() {
 
   const removeMutation = trpc.prayer.remove.useMutation({
     onSuccess: (_, { token }) => {
-      removeLocalToken(token);
+      // Encontrar todos os tokens do mesmo grupo para limpar do localStorage
+      const slot = slots.find(s => s.token === token);
+      const gt = slot?.groupToken ?? null;
+      if (gt) {
+        const groupTokens = slots.filter(s => s.groupToken === gt).map(s => s.token);
+        groupTokens.forEach(t => removeLocalToken(t));
+      } else {
+        removeLocalToken(token);
+      }
       setLocalTokens(getLocalTokens());
       setRemoving(null);
       refetch();
@@ -151,19 +196,22 @@ export default function Home() {
     e.preventDefault();
     if (!name.trim()) { toast.error("Por favor insira o seu nome."); return; }
     const startMinutes = ALL_SLOTS_30[startIdx]?.minutes ?? 0;
-    if (occupiedMinutes.has(startMinutes)) {
+    if (startSlotOccupied) {
       toast.error("Este horário já está ocupado. Por favor escolha outro.");
       return;
     }
-    const endMinutes = (startMinutes + 30) % 1440;
-    addMutation.mutate({ name: name.trim(), startMinutes, endMinutes });
-  }, [name, startIdx, addMutation, occupiedMinutes]);
+    if (duration === 60 && secondSlotOccupied) {
+      toast.error("O segundo horário de 30 minutos está ocupado. Escolha outro horário ou reduza para 30 minutos.");
+      return;
+    }
+    addMutation.mutate({ name: name.trim(), startMinutes, durationMinutes: duration });
+  }, [name, startIdx, duration, addMutation, startSlotOccupied, secondSlotOccupied]);
 
-  // Preview: sempre 30 minutos a partir do início seleccionado
+  // Preview: calcula o fim com base na duração seleccionada
   const previewEnd = useMemo(() => {
     const s = ALL_SLOTS_30[startIdx]?.minutes ?? 0;
-    return (s + 30) % 1440;
-  }, [startIdx]);
+    return (s + duration) % 1440;
+  }, [startIdx, duration]);
 
   // ─── Exportação CSV ──────────────────────────────────────────────────────────
   const exportCSV = useCallback(() => {
@@ -450,22 +498,54 @@ export default function Home() {
               </select>
             </div>
 
+            {/* Selector de duração */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: C.textSec, marginBottom: 8 }}>
+                Duração da Oração
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <button type="button" onClick={() => setDuration(30)} style={{
+                  padding: "12px 16px", borderRadius: 8, cursor: "pointer",
+                  fontFamily: "'Inter', sans-serif", fontSize: "0.95rem", fontWeight: 700,
+                  transition: "all 0.15s", border: `2px solid ${duration === 30 ? C.primary : C.borderHi}`,
+                  background: duration === 30 ? "rgba(99,102,241,0.15)" : C.surface2,
+                  color: duration === 30 ? C.primaryL : C.textSec,
+                }}>
+                  🕐 30 minutos
+                </button>
+                <button type="button" onClick={() => setDuration(60)} style={{
+                  padding: "12px 16px", borderRadius: 8, cursor: "pointer",
+                  fontFamily: "'Inter', sans-serif", fontSize: "0.95rem", fontWeight: 700,
+                  transition: "all 0.15s", border: `2px solid ${duration === 60 ? C.primary : C.borderHi}`,
+                  background: duration === 60 ? "rgba(99,102,241,0.15)" : C.surface2,
+                  color: duration === 60 ? C.primaryL : C.textSec,
+                }}>
+                  🕐 1 hora
+                </button>
+              </div>
+            </div>
+
             {/* Aviso de horário ocupado */}
-            {startSlotOccupied && (
+            {anySlotOccupied && (
               <div style={{
                 background: "rgba(248,113,113,0.12)", border: `1.5px solid ${C.danger}`,
                 borderRadius: 8, padding: "10px 14px", marginBottom: 12,
                 fontSize: "0.82rem", color: C.danger, display: "flex", alignItems: "center", gap: 8,
               }}>
                 <span>⚠️</span>
-                <span>Este horário já está ocupado. Por favor escolha outro horário livre.</span>
+                <span>
+                  {startSlotOccupied
+                    ? "Este horário já está ocupado. Por favor escolha outro."
+                    : `O horário seguinte (${minutesToTime((ALL_SLOTS_30[startIdx]?.minutes ?? 0) + 30)}) já está ocupado. Escolha outro horário ou reduza para 30 minutos.`
+                  }
+                </span>
               </div>
             )}
 
             {/* Preview automático */}
-            {!startSlotOccupied && (
+            {!anySlotOccupied && (
               <div style={{
-                display: "flex", alignItems: "center", gap: 10,
+                display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
                 background: C.successBg, border: `1px solid ${C.success}`,
                 borderRadius: 8, padding: "10px 14px", marginBottom: 16,
               }}>
@@ -473,24 +553,24 @@ export default function Home() {
                 <span style={{ fontSize: "1rem", fontWeight: 700, color: C.success, fontFamily: "'JetBrains Mono', monospace" }}>
                   {ALL_SLOTS_30[startIdx]?.label} → {minutesToTime(previewEnd)}
                 </span>
-                <span style={{ marginLeft: "auto", fontSize: "0.8rem", fontWeight: 600, color: C.success }}>30 minutos</span>
+                <span style={{ marginLeft: "auto", fontSize: "0.8rem", fontWeight: 600, color: C.success }}>{duration === 30 ? "30 minutos" : "1 hora"}</span>
               </div>
             )}
 
             {/* Botão */}
             <button
-              type="submit" disabled={addMutation.isPending || startSlotOccupied}
+              type="submit" disabled={addMutation.isPending || anySlotOccupied}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                background: (addMutation.isPending || startSlotOccupied) ? C.border : C.primary,
+                background: (addMutation.isPending || anySlotOccupied) ? C.border : C.primary,
                 color: "#fff", border: "none", borderRadius: 10,
-                cursor: (addMutation.isPending || startSlotOccupied) ? "not-allowed" : "pointer",
+                cursor: (addMutation.isPending || anySlotOccupied) ? "not-allowed" : "pointer",
                 fontFamily: "'Inter', sans-serif", fontSize: "1rem", fontWeight: 700,
                 padding: "14px 24px", width: "100%", transition: "all 0.15s",
                 letterSpacing: "0.02em",
               }}
-              onMouseEnter={e => { if (!addMutation.isPending && !startSlotOccupied) (e.currentTarget as HTMLButtonElement).style.background = "#4f46e5"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = (addMutation.isPending || startSlotOccupied) ? C.border : C.primary; }}>
+              onMouseEnter={e => { if (!addMutation.isPending && !anySlotOccupied) (e.currentTarget as HTMLButtonElement).style.background = "#4f46e5"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = (addMutation.isPending || anySlotOccupied) ? C.border : C.primary; }}>
               {addMutation.isPending ? "⏳ A registar..." : "🙏 Registar o Meu Horário"}
             </button>
           </form>
@@ -520,7 +600,7 @@ export default function Home() {
               👥 Lista de Intercessores
             </div>
             <span style={{ fontSize: "0.72rem", fontWeight: 700, padding: "3px 10px", borderRadius: 99, background: "rgba(96,165,250,0.12)", color: C.blue, border: "1px solid rgba(96,165,250,0.25)" }}>
-              {slots.length} participante{slots.length !== 1 ? "s" : ""}
+              {uniqueParticipantCount} participante{uniqueParticipantCount !== 1 ? "s" : ""}
             </span>
           </div>
 
@@ -533,66 +613,89 @@ export default function Home() {
           ) : (
             <>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {slots.map((slot, i) => {
-                  const isOwn = localTokens.includes(slot.token);
-                  const dur = slotDuration(slot.startMinutes, slot.endMinutes);
-                  return (
-                    <div key={slot.id} style={{
-                      background: isOwn ? "rgba(99,102,241,0.08)" : C.surface2,
-                      border: `1px solid ${isOwn ? "rgba(99,102,241,0.35)" : C.border}`,
-                      borderRadius: 10, padding: "14px 16px",
-                    }}>
-                      {/* Linha 1: Número + Nome + Botão */}
-                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
-                        <span style={{
-                          flexShrink: 0, width: 28, height: 28, marginTop: 1,
-                          display: "inline-flex", alignItems: "center", justifyContent: "center",
-                          borderRadius: "50%", background: "rgba(99,102,241,0.18)",
-                          fontSize: "0.72rem", fontWeight: 700, color: C.primaryL,
-                        }}>{i + 1}</span>
-                        <span style={{ flex: 1, fontWeight: 700, fontSize: "1.05rem", color: C.text, wordBreak: "break-word", lineHeight: 1.3 }}>
-                          {slot.name}
+                {(() => {
+                  // Agrupar registos com o mesmo groupToken
+                  const grouped: { name: string; startMinutes: number; endMinutes: number; token: string; tokens: string[]; id: number; groupToken: string | null }[] = [];
+                  const seen = new Set<string>();
+                  for (const slot of slots) {
+                    const gt = slot.groupToken ?? null;
+                    if (gt && seen.has(gt)) continue;
+                    if (gt) seen.add(gt);
+                    // Encontrar todos os registos do mesmo grupo
+                    const groupSlots = gt ? slots.filter(s => s.groupToken === gt).sort((a, b) => a.startMinutes - b.startMinutes) : [slot];
+                    const first = groupSlots[0]!;
+                    const last = groupSlots[groupSlots.length - 1]!;
+                    grouped.push({
+                      name: first.name,
+                      startMinutes: first.startMinutes,
+                      endMinutes: last.endMinutes,
+                      token: first.token,
+                      tokens: groupSlots.map(s => s.token),
+                      id: first.id,
+                      groupToken: gt,
+                    });
+                  }
+                  return grouped.map((entry, i) => {
+                    const isOwn = entry.tokens.some(t => localTokens.includes(t));
+                    const dur = slotDuration(entry.startMinutes, entry.endMinutes);
+                    return (
+                      <div key={entry.id} style={{
+                        background: isOwn ? "rgba(99,102,241,0.08)" : C.surface2,
+                        border: `1px solid ${isOwn ? "rgba(99,102,241,0.35)" : C.border}`,
+                        borderRadius: 10, padding: "14px 16px",
+                      }}>
+                        {/* Linha 1: Número + Nome + Botão */}
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+                          <span style={{
+                            flexShrink: 0, width: 28, height: 28, marginTop: 1,
+                            display: "inline-flex", alignItems: "center", justifyContent: "center",
+                            borderRadius: "50%", background: "rgba(99,102,241,0.18)",
+                            fontSize: "0.72rem", fontWeight: 700, color: C.primaryL,
+                          }}>{i + 1}</span>
+                          <span style={{ flex: 1, fontWeight: 700, fontSize: "1.05rem", color: C.text, wordBreak: "break-word", lineHeight: 1.3 }}>
+                            {entry.name}
+                            {isOwn && (
+                              <span style={{ marginLeft: 8, fontSize: "0.65rem", padding: "2px 7px", borderRadius: 99, background: "rgba(99,102,241,0.2)", color: C.primaryL, border: "1px solid rgba(99,102,241,0.35)", verticalAlign: "middle" }}>
+                                você
+                              </span>
+                            )}
+                          </span>
                           {isOwn && (
-                            <span style={{ marginLeft: 8, fontSize: "0.65rem", padding: "2px 7px", borderRadius: 99, background: "rgba(99,102,241,0.2)", color: C.primaryL, border: "1px solid rgba(99,102,241,0.35)", verticalAlign: "middle" }}>
-                              você
-                            </span>
+                            <button
+                              onClick={() => { setRemoving(entry.token); removeMutation.mutate({ token: entry.token }); }}
+                              disabled={removing === entry.token}
+                              style={{
+                                flexShrink: 0, background: "rgba(248,113,113,0.1)",
+                                border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8,
+                                cursor: "pointer", color: C.danger, padding: "6px 10px",
+                                fontSize: "0.78rem", fontWeight: 600, transition: "all 0.15s",
+                                display: "inline-flex", alignItems: "center", gap: 4,
+                                opacity: removing === entry.token ? 0.5 : 1, whiteSpace: "nowrap",
+                              }}>
+                              🗑️ Remover
+                            </button>
                           )}
-                        </span>
-                        {isOwn && (
-                          <button
-                            onClick={() => { setRemoving(slot.token); removeMutation.mutate({ token: slot.token }); }}
-                            disabled={removing === slot.token}
-                            style={{
-                              flexShrink: 0, background: "rgba(248,113,113,0.1)",
-                              border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8,
-                              cursor: "pointer", color: C.danger, padding: "6px 10px",
-                              fontSize: "0.78rem", fontWeight: 600, transition: "all 0.15s",
-                              display: "inline-flex", alignItems: "center", gap: 4,
-                              opacity: removing === slot.token ? 0.5 : 1, whiteSpace: "nowrap",
-                            }}>
-                            🗑️ Remover
-                          </button>
-                        )}
-                      </div>
+                        </div>
 
-                      {/* Linha 2: Horários + Duração */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.25)", borderRadius: 8, padding: "6px 12px" }}>
-                          <span style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase" }}>Início</span>
-                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "1rem", fontWeight: 700, color: C.blue }}>{minutesToTime(slot.startMinutes)}</span>
-                        </div>
-                        <span style={{ color: C.muted }}>→</span>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(192,132,252,0.1)", border: "1px solid rgba(192,132,252,0.25)", borderRadius: 8, padding: "6px 12px" }}>
-                          <span style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase" }}>Fim</span>
-                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "1rem", fontWeight: 700, color: C.violet }}>{minutesToTime(slot.endMinutes)}</span>
-                        </div>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 8, padding: "6px 10px" }}>
-                          <span style={{ fontSize: "0.85rem", fontWeight: 700, color: C.success }}>⏱ {formatDuration(dur)}</span>
+                        {/* Linha 2: Horários + Duração */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.25)", borderRadius: 8, padding: "6px 12px" }}>
+                            <span style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase" }}>Início</span>
+                            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "1rem", fontWeight: 700, color: C.blue }}>{minutesToTime(entry.startMinutes)}</span>
+                          </div>
+                          <span style={{ color: C.muted }}>→</span>
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(192,132,252,0.1)", border: "1px solid rgba(192,132,252,0.25)", borderRadius: 8, padding: "6px 12px" }}>
+                            <span style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase" }}>Fim</span>
+                            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "1rem", fontWeight: 700, color: C.violet }}>{minutesToTime(entry.endMinutes)}</span>
+                          </div>
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 8, padding: "6px 10px" }}>
+                            <span style={{ fontSize: "0.85rem", fontWeight: 700, color: C.success }}>⏱ {formatDuration(dur)}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
               </div>
 
               {/* Rodapé — apenas total coberto */}

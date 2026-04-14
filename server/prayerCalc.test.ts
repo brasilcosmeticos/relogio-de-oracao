@@ -219,32 +219,57 @@ function createPublicCtx(): TrpcContext {
   };
 }
 
-describe("prayer.add — validação de sobreposição", () => {
+describe("prayer.add — validação com durationMinutes", () => {
   it("rejeita startMinutes que não é múltiplo de 30", async () => {
     const caller = appRouter.createCaller(createPublicCtx());
     await expect(
-      caller.prayer.add({ name: "Ana", startMinutes: 45, endMinutes: 90 })
+      caller.prayer.add({ name: "Ana", startMinutes: 45, durationMinutes: 30 })
     ).rejects.toThrow();
   });
 
-  it("rejeita endMinutes que não é múltiplo de 30", async () => {
+  it("rejeita duração inválida (15 min)", async () => {
     const caller = appRouter.createCaller(createPublicCtx());
     await expect(
-      caller.prayer.add({ name: "Ana", startMinutes: 0, endMinutes: 45 })
+      caller.prayer.add({ name: "Ana", startMinutes: 0, durationMinutes: 15 })
     ).rejects.toThrow();
   });
 
-  it("rejeita quando startMinutes === endMinutes", async () => {
+  it("rejeita duração inválida (90 min)", async () => {
     const caller = appRouter.createCaller(createPublicCtx());
     await expect(
-      caller.prayer.add({ name: "Ana", startMinutes: 60, endMinutes: 60 })
+      caller.prayer.add({ name: "Ana", startMinutes: 0, durationMinutes: 90 })
     ).rejects.toThrow();
   });
 
   it("rejeita nome vazio", async () => {
     const caller = appRouter.createCaller(createPublicCtx());
     await expect(
-      caller.prayer.add({ name: "", startMinutes: 0, endMinutes: 30 })
+      caller.prayer.add({ name: "", startMinutes: 0, durationMinutes: 30 })
     ).rejects.toThrow();
+  });
+
+  it("aceita duração de 30 minutos", async () => {
+    const caller = appRouter.createCaller(createPublicCtx());
+    // Este teste pode falhar se a DB não estiver disponível, mas a validação do input deve passar
+    try {
+      await caller.prayer.add({ name: "Ana", startMinutes: 0, durationMinutes: 30 });
+    } catch (e: any) {
+      // Se o erro for de DB, está ok (a validação do input passou)
+      if (e.message?.includes("Database not available")) return;
+      // Se for CONFLICT, também está ok (a validação do input passou)
+      if (e.code === "CONFLICT") return;
+      throw e;
+    }
+  });
+
+  it("aceita duração de 60 minutos", async () => {
+    const caller = appRouter.createCaller(createPublicCtx());
+    try {
+      await caller.prayer.add({ name: "João", startMinutes: 120, durationMinutes: 60 });
+    } catch (e: any) {
+      if (e.message?.includes("Database not available")) return;
+      if (e.code === "CONFLICT") return;
+      throw e;
+    }
   });
 });

@@ -10,6 +10,7 @@ export interface PrayerSlot {
   startMinutes: number;
   endMinutes: number;
   token: string;
+  groupToken?: string | null;
   createdAt: Date;
 }
 

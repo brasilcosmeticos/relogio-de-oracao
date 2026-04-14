@@ -28,6 +28,7 @@ export const prayerSlots = mysqlTable("prayer_slots", {
   startMinutes: int("startMinutes").notNull(),
   endMinutes: int("endMinutes").notNull(),
   token: varchar("token", { length: 64 }).notNull().unique(),
+  groupToken: varchar("groupToken", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

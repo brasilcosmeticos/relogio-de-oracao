@@ -71,8 +71,15 @@ export async function addPrayerSlot(slot: InsertPrayerSlot) {
 export async function removePrayerSlot(token: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.delete(prayerSlots).where(eq(prayerSlots.token, token));
-  return result;
+  // Primeiro, encontrar o registo pelo token individual
+  const slot = await db.select().from(prayerSlots).where(eq(prayerSlots.token, token)).limit(1);
+  if (slot.length === 0) return;
+  // Se tem groupToken, apagar todos os registos do mesmo grupo
+  if (slot[0].groupToken) {
+    await db.delete(prayerSlots).where(eq(prayerSlots.groupToken, slot[0].groupToken));
+  } else {
+    await db.delete(prayerSlots).where(eq(prayerSlots.token, token));
+  }
 }
 
 export async function getPrayerSlotByToken(token: string) {
