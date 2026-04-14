@@ -50,3 +50,8 @@
 ## Correcção de Sobreposição (v2.2)
 - [x] Corrigir lógica: cada slot de 30min só pode ter UM intercessor; bloquear no formulário os slots já ocupados (dropdown só mostra slots livres como início/fim)
 - [x] Grelha: slots ocupados marcados com ❌ no dropdown de início; aviso visual de conflito ao seleccionar intervalo com slots ocupados
+
+## Simplificação do Formulário (v2.3)
+- [x] Remover selector de hora de término — o fim é sempre início + 30 minutos (calculado automaticamente)
+- [x] Actualizar preview para mostrar apenas "06:00 → 06:30 (30 minutos)" com borda verde
+- [x] Actualizar validação: apenas verificar se o slot de início está livre; aviso vermelho se ocupado

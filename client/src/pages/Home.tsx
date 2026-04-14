@@ -62,7 +62,6 @@ const C = {
 export default function Home() {
   const [name, setName]             = useState("");
   const [startIdx, setStartIdx]     = useState(12);  // 06:00 por defeito
-  const [endIdx, setEndIdx]         = useState(14);  // 07:00 por defeito
   const [localTokens, setLocalTokens] = useState<string[]>(getLocalTokens);
   const [celebrated, setCelebrated]   = useState(false);
   const [removing, setRemoving]       = useState<string | null>(null);
@@ -108,19 +107,11 @@ export default function Home() {
     return ALL_SLOTS_30.filter(s => !occupiedMinutes.has(s.minutes));
   }, [occupiedMinutes]);
 
-  // Verifica se o intervalo seleccionado contém algum slot já ocupado
-  const conflictingSlots = useMemo(() => {
+  // Slot de início seleccionado está ocupado?
+  const startSlotOccupied = useMemo(() => {
     const startMin = ALL_SLOTS_30[startIdx]?.minutes ?? 0;
-    const endMin   = ALL_SLOTS_30[endIdx]?.minutes ?? 30;
-    if (startMin === endMin) return [];
-    const inRange: number[] = [];
-    let cur = startMin;
-    while (cur !== endMin) {
-      if (occupiedMinutes.has(cur)) inRange.push(cur);
-      cur = (cur + 30) % 1440;
-    }
-    return inRange;
-  }, [startIdx, endIdx, occupiedMinutes]);
+    return occupiedMinutes.has(startMin);
+  }, [startIdx, occupiedMinutes]);
 
   useEffect(() => {
     if (percentage >= 100 && !celebrated) setCelebrated(true);
@@ -133,7 +124,6 @@ export default function Home() {
       setLocalTokens(getLocalTokens());
       setName("");
       setStartIdx(12);
-      setEndIdx(14);
       refetch();
       toast.success("Horário registado com sucesso! 🙏");
     },
@@ -155,23 +145,19 @@ export default function Home() {
     e.preventDefault();
     if (!name.trim()) { toast.error("Por favor insira o seu nome."); return; }
     const startMinutes = ALL_SLOTS_30[startIdx]?.minutes ?? 0;
-    const endMinutes   = ALL_SLOTS_30[endIdx]?.minutes ?? 30;
-    if (startMinutes === endMinutes) { toast.error("O horário de início e de fim não podem ser iguais."); return; }
-    if (conflictingSlots.length > 0) {
-      const labels = conflictingSlots.map(m => ALL_SLOTS_30.find(s => s.minutes === m)?.label ?? "").join(", ");
-      toast.error(`O intervalo contém slots já ocupados: ${labels}. Por favor escolha horários livres.`);
+    if (occupiedMinutes.has(startMinutes)) {
+      toast.error("Este horário já está ocupado. Por favor escolha outro.");
       return;
     }
+    const endMinutes = (startMinutes + 30) % 1440;
     addMutation.mutate({ name: name.trim(), startMinutes, endMinutes });
-  }, [name, startIdx, endIdx, addMutation, conflictingSlots]);
+  }, [name, startIdx, addMutation, occupiedMinutes]);
 
-  // ─── Preview da duração seleccionada ────────────────────────────────────────
-  const previewDuration = useMemo(() => {
+  // Preview: sempre 30 minutos a partir do início seleccionado
+  const previewEnd = useMemo(() => {
     const s = ALL_SLOTS_30[startIdx]?.minutes ?? 0;
-    const e = ALL_SLOTS_30[endIdx]?.minutes ?? 30;
-    if (s === e) return null;
-    return { dur: slotDuration(s, e), crossesMidnight: e < s };
-  }, [startIdx, endIdx]);
+    return (s + 30) % 1440;
+  }, [startIdx]);
 
   // ─── Exportação CSV ──────────────────────────────────────────────────────────
   const exportCSV = useCallback(() => {
@@ -406,106 +392,61 @@ export default function Home() {
               />
             </div>
 
-            {/* Selectores de horário */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-              {/* Hora Início */}
-              <div>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: C.textSec, marginBottom: 8 }}>
-                  ▶ Hora de Início
-                </label>
-                <select
-                  value={startIdx}
-                  onChange={e => setStartIdx(Number(e.target.value))}
-                  style={{
-                    width: "100%", background: C.surface2,
-                    border: `1.5px solid ${C.borderHi}`, borderRadius: 8,
-                    color: C.text, fontFamily: "'JetBrains Mono', 'Courier New', monospace",
-                    fontSize: "1rem", fontWeight: 700, padding: "12px 14px",
-                    outline: "none", cursor: "pointer", WebkitAppearance: "none",
-                    appearance: "none", boxSizing: "border-box",
-                  }}
-                  onFocus={e => { e.target.style.borderColor = C.blue; e.target.style.boxShadow = `0 0 0 3px rgba(96,165,250,0.2)`; }}
-                  onBlur={e => { e.target.style.borderColor = C.borderHi; e.target.style.boxShadow = "none"; }}
-                >
-                  {ALL_SLOTS_30.map((s, i) => {
-                    const isOccupied = occupiedMinutes.has(s.minutes);
-                    return (
-                      <option key={s.minutes} value={i} disabled={isOccupied}
-                        style={{ background: C.surface2, color: isOccupied ? C.muted : C.text }}>
-                        {isOccupied ? `❌ ${s.label} (ocupado)` : s.label}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              {/* Hora Fim */}
-              <div>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: C.textSec, marginBottom: 8 }}>
-                  ■ Hora de Término
-                </label>
-                <select
-                  value={endIdx}
-                  onChange={e => setEndIdx(Number(e.target.value))}
-                  style={{
-                    width: "100%", background: C.surface2,
-                    border: `1.5px solid ${C.borderHi}`, borderRadius: 8,
-                    color: C.text, fontFamily: "'JetBrains Mono', 'Courier New', monospace",
-                    fontSize: "1rem", fontWeight: 700, padding: "12px 14px",
-                    outline: "none", cursor: "pointer", WebkitAppearance: "none",
-                    appearance: "none", boxSizing: "border-box",
-                  }}
-                  onFocus={e => { e.target.style.borderColor = C.violet; e.target.style.boxShadow = `0 0 0 3px rgba(192,132,252,0.2)`; }}
-                  onBlur={e => { e.target.style.borderColor = C.borderHi; e.target.style.boxShadow = "none"; }}
-                >
-                  {ALL_SLOTS_30.map((s, i) => {
-                    const isOccupied = occupiedMinutes.has(s.minutes);
-                    return (
-                      <option key={s.minutes} value={i}
-                        style={{ background: C.surface2, color: isOccupied ? C.muted : C.text }}>
-                        {s.label}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
+            {/* Selector de horário de início */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: C.textSec, marginBottom: 8 }}>
+                ▶ Hora de Início
+              </label>
+              <select
+                value={startIdx}
+                onChange={e => setStartIdx(Number(e.target.value))}
+                style={{
+                  width: "100%", background: C.surface2,
+                  border: `1.5px solid ${startSlotOccupied ? C.danger : C.borderHi}`, borderRadius: 8,
+                  color: C.text, fontFamily: "'JetBrains Mono', 'Courier New', monospace",
+                  fontSize: "1.05rem", fontWeight: 700, padding: "14px 16px",
+                  outline: "none", cursor: "pointer", WebkitAppearance: "none",
+                  appearance: "none", boxSizing: "border-box",
+                }}
+                onFocus={e => { e.target.style.borderColor = startSlotOccupied ? C.danger : C.blue; e.target.style.boxShadow = `0 0 0 3px ${startSlotOccupied ? "rgba(248,113,113,0.2)" : "rgba(96,165,250,0.2)"}`; }}
+                onBlur={e => { e.target.style.borderColor = startSlotOccupied ? C.danger : C.borderHi; e.target.style.boxShadow = "none"; }}
+              >
+                {ALL_SLOTS_30.map((s, i) => {
+                  const isOccupied = occupiedMinutes.has(s.minutes);
+                  return (
+                    <option key={s.minutes} value={i} disabled={isOccupied}
+                      style={{ background: C.surface2, color: isOccupied ? C.muted : C.text }}>
+                      {isOccupied ? `❌ ${s.label} (ocupado)` : s.label}
+                    </option>
+                  );
+                })}
+              </select>
             </div>
 
-            {/* Aviso de conflito */}
-            {conflictingSlots.length > 0 && (
+            {/* Aviso de slot ocupado */}
+            {startSlotOccupied && (
               <div style={{
                 background: "rgba(248,113,113,0.12)", border: `1.5px solid ${C.danger}`,
                 borderRadius: 8, padding: "10px 14px", marginBottom: 12,
-                fontSize: "0.82rem", color: C.danger, display: "flex", alignItems: "flex-start", gap: 8,
+                fontSize: "0.82rem", color: C.danger, display: "flex", alignItems: "center", gap: 8,
               }}>
-                <span style={{ fontSize: "1rem" }}>⚠️</span>
-                <span>
-                  <strong>Conflito detectado:</strong> os seguintes slots já estão ocupados no intervalo seleccionado:{" "}
-                  <strong>{conflictingSlots.map(m => ALL_SLOTS_30.find(s => s.minutes === m)?.label ?? "").join(", ")}</strong>.
-                  Por favor ajuste o horário de início ou de término.
-                </span>
+                <span>⚠️</span>
+                <span>Este horário já está ocupado. Por favor escolha outro slot livre.</span>
               </div>
             )}
 
-            {/* Preview da duração */}
-            {previewDuration && (
+            {/* Preview automático: início → início+30min */}
+            {!startSlotOccupied && (
               <div style={{
                 display: "flex", alignItems: "center", gap: 10,
-                background: C.surface2, border: `1px solid ${C.border}`,
+                background: C.successBg, border: `1px solid ${C.success}`,
                 borderRadius: 8, padding: "10px 14px", marginBottom: 16,
               }}>
-                <span style={{ fontSize: "0.85rem", color: C.muted }}>Duração:</span>
-                <span style={{ fontSize: "0.95rem", fontWeight: 700, color: C.primaryL }}>
-                  {formatDuration(previewDuration.dur)}
+                <span style={{ fontSize: "0.85rem", color: C.muted }}>O seu slot:</span>
+                <span style={{ fontSize: "1rem", fontWeight: 700, color: C.success, fontFamily: "'JetBrains Mono', monospace" }}>
+                  {ALL_SLOTS_30[startIdx]?.label} → {minutesToTime(previewEnd)}
                 </span>
-                {previewDuration.crossesMidnight && (
-                  <span style={{ fontSize: "0.75rem", color: C.warning, marginLeft: 4 }}>
-                    🌙 atravessa a meia-noite
-                  </span>
-                )}
-                <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: C.muted }}>
-                  {ALL_SLOTS_30[startIdx]?.label} → {ALL_SLOTS_30[endIdx]?.label}
-                </span>
+                <span style={{ marginLeft: "auto", fontSize: "0.8rem", fontWeight: 600, color: C.success }}>30 minutos</span>
               </div>
             )}
 
