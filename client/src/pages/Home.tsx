@@ -310,17 +310,19 @@ export default function Home() {
           </button>
         </div>
 
-        {/* ── Tabela de Participantes ──────────────────────────────────────── */}
+        {/* ── Lista de Participantes (Cartões Mobile-First) ────────────── */}
         <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20, marginBottom: 20 }}>
+          {/* Cabeçalho */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontSize: "0.9rem", fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 8, fontFamily: "'Inter', sans-serif" }}>
+            <div style={{ fontSize: "0.9rem", fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 8 }}>
               👥 Lista de Intercessores
             </div>
-            <span style={{ display: "inline-flex", alignItems: "center", fontSize: "0.72rem", fontWeight: 600, padding: "2px 8px", borderRadius: 99, background: "rgba(59,130,246,0.12)", color: C.blue, border: "1px solid rgba(59,130,246,0.25)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", fontSize: "0.72rem", fontWeight: 600, padding: "3px 10px", borderRadius: 99, background: "rgba(59,130,246,0.12)", color: C.blue, border: "1px solid rgba(59,130,246,0.25)" }}>
               {slots.length} participante{slots.length !== 1 ? "s" : ""}
             </span>
           </div>
 
+          {/* Estado vazio */}
           {slots.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px 16px", color: C.muted }}>
               <div style={{ fontSize: "2.5rem", opacity: 0.3, marginBottom: 10 }}>🙏</div>
@@ -328,76 +330,126 @@ export default function Home() {
               <small style={{ fontSize: "0.78rem", opacity: 0.7 }}>Seja o primeiro a inscrever o seu horário de oração!</small>
             </div>
           ) : (
-            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
-                <thead>
-                  <tr>
-                    {["#", "Nome", "Início", "Término", "Duração", "Cobertura", ""].map(h => (
-                      <th key={h} style={{ textAlign: "left", padding: "8px 10px", fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: C.muted, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {slots.map((slot, i) => {
-                    const isOwn = localTokens.includes(slot.token);
-                    const dur = slotDuration(slot.startMinutes, slot.endMinutes);
-                    const pct = Math.round((dur / 1440) * 100);
-                    return (
-                      <tr key={slot.id} style={{ borderBottom: i < slots.length - 1 ? `1px solid rgba(51,65,85,0.5)` : undefined, transition: "background 0.15s" }}
-                        onMouseEnter={e => (e.currentTarget as HTMLTableRowElement).style.background = "rgba(255,255,255,0.03)"}
-                        onMouseLeave={e => (e.currentTarget as HTMLTableRowElement).style.background = "transparent"}>
-                        <td style={{ padding: "10px 10px", color: C.muted, fontSize: "0.75rem" }}>{i + 1}</td>
-                        <td style={{ padding: "10px 10px", fontWeight: 500 }}>
+            <>
+              {/* Cartões de participantes */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {slots.map((slot, i) => {
+                  const isOwn = localTokens.includes(slot.token);
+                  const dur = slotDuration(slot.startMinutes, slot.endMinutes);
+                  const pct = Math.round((dur / 1440) * 100);
+                  const crossesMidnight = slot.endMinutes < slot.startMinutes;
+                  return (
+                    <div key={slot.id} style={{
+                      background: isOwn ? "rgba(99,102,241,0.06)" : C.surface2,
+                      border: `1px solid ${isOwn ? "rgba(99,102,241,0.3)" : C.border}`,
+                      borderRadius: 10,
+                      padding: "14px 16px",
+                      transition: "border-color 0.15s",
+                    }}>
+                      {/* Linha 1: Número + Nome + Badge + Botão remover */}
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+                        <span style={{
+                          flexShrink: 0, width: 28, height: 28, marginTop: 1,
+                          display: "inline-flex", alignItems: "center", justifyContent: "center",
+                          borderRadius: "50%", background: "rgba(99,102,241,0.15)",
+                          fontSize: "0.72rem", fontWeight: 700, color: C.primaryL,
+                        }}>{i + 1}</span>
+                        <span style={{ flex: 1, fontWeight: 600, fontSize: "1.05rem", color: C.text, wordBreak: "break-word", lineHeight: 1.3 }}>
                           {slot.name}
                           {isOwn && (
-                            <span style={{ marginLeft: 6, fontSize: "0.68rem", padding: "1px 6px", borderRadius: 99, background: "rgba(99,102,241,0.15)", color: C.primaryL, border: "1px solid rgba(99,102,241,0.25)" }}>
+                            <span style={{ marginLeft: 8, fontSize: "0.65rem", padding: "2px 7px", borderRadius: 99, background: "rgba(99,102,241,0.18)", color: C.primaryL, border: "1px solid rgba(99,102,241,0.3)", verticalAlign: "middle" }}>
                               você
                             </span>
                           )}
-                        </td>
-                        <td style={{ padding: "10px 10px", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.82rem", color: C.blue }}>{minutesToTime(slot.startMinutes)}</td>
-                        <td style={{ padding: "10px 10px", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.82rem", color: C.violet }}>{minutesToTime(slot.endMinutes)}</td>
-                        <td style={{ padding: "10px 10px", color: C.muted, fontSize: "0.82rem" }}>{formatDuration(dur)}</td>
-                        <td style={{ padding: "10px 10px" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 80 }}>
-                            <div style={{ flex: 1, height: 4, background: C.surface2, borderRadius: 99, overflow: "hidden" }}>
-                              <div style={{ height: "100%", borderRadius: 99, background: C.primary, width: `${Math.min(pct, 100)}%` }} />
-                            </div>
-                            <span style={{ fontSize: "0.7rem", color: C.muted, width: 30, textAlign: "right" }}>{pct}%</span>
-                          </div>
-                        </td>
-                        <td style={{ padding: "10px 10px" }}>
-                          {isOwn && (
-                            <button
-                              onClick={() => { setRemoving(slot.token); removeMutation.mutate({ token: slot.token }); }}
-                              disabled={removing === slot.token}
-                              style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: "4px 6px", borderRadius: 6, fontSize: "1rem", transition: "all 0.15s", lineHeight: 1 }}
-                              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = C.danger; (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.1)"; }}
-                              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = C.muted; (e.currentTarget as HTMLButtonElement).style.background = "none"; }}>
-                              🗑️
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr style={{ borderTop: `2px solid ${C.border}` }}>
-                    <td colSpan={4} style={{ padding: "10px 10px", fontSize: "0.7rem", fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Total bruto (com sobreposições)</td>
-                    <td colSpan={3} style={{ padding: "10px 10px", fontSize: "0.82rem", color: C.primaryL, fontWeight: 600 }}>{formatDuration(totalBruto)}</td>
-                  </tr>
-                  <tr>
-                    <td colSpan={4} style={{ padding: "10px 10px", fontSize: "0.7rem", fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Total único (sem sobreposições)</td>
-                    <td colSpan={3} style={{ padding: "10px 10px", fontSize: "0.82rem", color: C.success, fontWeight: 700 }}>{formatDuration(uniqueMinutes)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                        </span>
+                        {isOwn && (
+                          <button
+                            onClick={() => { setRemoving(slot.token); removeMutation.mutate({ token: slot.token }); }}
+                            disabled={removing === slot.token}
+                            title="Remover o meu horário"
+                            style={{
+                              flexShrink: 0, background: "rgba(239,68,68,0.08)",
+                              border: "1px solid rgba(239,68,68,0.25)", borderRadius: 8,
+                              cursor: "pointer", color: C.danger, padding: "6px 10px",
+                              fontSize: "0.78rem", fontWeight: 600, transition: "all 0.15s",
+                              display: "inline-flex", alignItems: "center", gap: 4,
+                              opacity: removing === slot.token ? 0.5 : 1,
+                              whiteSpace: "nowrap",
+                            }}
+                            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.18)"; }}
+                            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.08)"; }}>
+                            🗑️ <span>Remover</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Linha 2: Blocos de horário + duração */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                        <div style={{
+                          display: "inline-flex", alignItems: "center", gap: 6,
+                          background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)",
+                          borderRadius: 8, padding: "6px 12px",
+                        }}>
+                          <span style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Início</span>
+                          <span style={{ fontFamily: "'JetBrains Mono', 'Courier New', monospace", fontSize: "1.05rem", fontWeight: 700, color: C.blue }}>
+                            {minutesToTime(slot.startMinutes)}
+                          </span>
+                        </div>
+                        <span style={{ color: C.muted, fontSize: "1rem" }}>→</span>
+                        <div style={{
+                          display: "inline-flex", alignItems: "center", gap: 6,
+                          background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.2)",
+                          borderRadius: 8, padding: "6px 12px",
+                        }}>
+                          <span style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Fim</span>
+                          <span style={{ fontFamily: "'JetBrains Mono', 'Courier New', monospace", fontSize: "1.05rem", fontWeight: 700, color: C.violet }}>
+                            {minutesToTime(slot.endMinutes)}
+                          </span>
+                        </div>
+                        <div style={{
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                          background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)",
+                          borderRadius: 8, padding: "6px 10px",
+                        }}>
+                          <span style={{ fontSize: "0.75rem", color: C.muted }}>⏱</span>
+                          <span style={{ fontSize: "0.88rem", fontWeight: 600, color: C.success }}>{formatDuration(dur)}</span>
+                        </div>
+                        {crossesMidnight && (
+                          <span style={{ fontSize: "0.68rem", padding: "3px 8px", borderRadius: 99, background: "rgba(245,158,11,0.1)", color: C.warning, border: "1px solid rgba(245,158,11,0.25)" }}>
+                            🌙 meia-noite
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Linha 3: Barra de cobertura */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ flex: 1, height: 5, background: C.bg, borderRadius: 99, overflow: "hidden" }}>
+                          <div style={{ height: "100%", borderRadius: 99, background: `linear-gradient(90deg, ${C.primary}, ${C.primaryL})`, width: `${Math.min(pct, 100)}%`, transition: "width 0.4s" }} />
+                        </div>
+                        <span style={{ fontSize: "0.72rem", color: C.muted, minWidth: 32, textAlign: "right" }}>{pct}% do dia</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Rodapé de totais */}
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div style={{ background: C.surface2, borderRadius: 8, padding: "12px 14px" }}>
+                  <div style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Total bruto</div>
+                  <div style={{ fontSize: "1rem", fontWeight: 700, color: C.primaryL }}>{formatDuration(totalBruto)}</div>
+                  <div style={{ fontSize: "0.65rem", color: C.muted, marginTop: 2 }}>com sobreposições</div>
+                </div>
+                <div style={{ background: "rgba(16,185,129,0.07)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, padding: "12px 14px" }}>
+                  <div style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Total único</div>
+                  <div style={{ fontSize: "1rem", fontWeight: 700, color: C.success }}>{formatDuration(uniqueMinutes)}</div>
+                  <div style={{ fontSize: "0.65rem", color: C.muted, marginTop: 2 }}>sem sobreposições</div>
+                </div>
+              </div>
+            </>
           )}
         </div>
+
 
         {/* ── Mapa de Cobertura ────────────────────────────────────────────── */}
         {slots.length > 0 && (

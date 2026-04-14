@@ -29,7 +29,8 @@
 - [x] Push para repositório GitHub brasilcosmeticos/relogio-de-oracao
 
 ## Alterações
-- [ ] Alterar tema de dark mode para light mode elegante
+- [x] Alterar tema de dark mode para light mode elegante (revertido — utilizador pediu layout original dark)
 - [x] Replicar layout original: dark mode azul/índigo, hero com animação, cards coloridos, formulário em linha, mapa de barras customizado, tabela com mini-barras
-- [ ] Validar visualmente a página e corrigir responsividade do formulário em linha
-- [ ] Guardar checkpoint após validação final
+- [x] Validar visualmente a página e corrigir responsividade do formulário em linha
+- [x] Guardar checkpoint após validação final (version: 2b7fc28c)
+- [x] Redesenhar lista de intercessores: substituir tabela por cartões mobile-first com nome, horários, duração e botão de remoção claramente visíveis
