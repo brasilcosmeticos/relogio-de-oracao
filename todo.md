@@ -46,3 +46,7 @@
 ## Correcções Pendentes (v2.1)
 -- [x] Corrigir rodé da grelha: mostrar contagem real de slots ocupados (não participantes únicos))
 - [x] Adicionar testes tRPC para prayer.add: 48 testes passados (100% pass rate)
+
+## Correcção de Sobreposição (v2.2)
+- [x] Corrigir lógica: cada slot de 30min só pode ter UM intercessor; bloquear no formulário os slots já ocupados (dropdown só mostra slots livres como início/fim)
+- [x] Grelha: slots ocupados marcados com ❌ no dropdown de início; aviso visual de conflito ao seleccionar intervalo com slots ocupados
