@@ -27,3 +27,9 @@
 - [x] Testes Vitest para lógica de cálculo de cobertura (34 testes passados)
 - [x] Checkpoint final
 - [x] Push para repositório GitHub brasilcosmeticos/relogio-de-oracao
+
+## Alterações
+- [ ] Alterar tema de dark mode para light mode elegante
+- [x] Replicar layout original: dark mode azul/índigo, hero com animação, cards coloridos, formulário em linha, mapa de barras customizado, tabela com mini-barras
+- [ ] Validar visualmente a página e corrigir responsividade do formulário em linha
+- [ ] Guardar checkpoint após validação final
