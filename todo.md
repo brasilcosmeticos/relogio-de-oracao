@@ -55,3 +55,11 @@
 - [x] Remover selector de hora de término — o fim é sempre início + 30 minutos (calculado automaticamente)
 - [x] Actualizar preview para mostrar apenas "06:00 → 06:30 (30 minutos)" com borda verde
 - [x] Actualizar validação: apenas verificar se o slot de início está livre; aviso vermelho se ocupado
+
+## Melhorias UX e Revisão Geral (v2.4)
+- [x] Toque/clique no horário livre na grelha → preenche automaticamente o formulário com esse horário, scroll até ao formulário
+- [x] Remover o termo "slot" de toda a interface — substituir por "horário", "período" ou equivalente natural
+- [x] Remover "Total Bruto" (desnecessário sem sobreposição) — manter apenas o total único
+- [x] Corrigir título da grelha: remover "48 SLOTS DE 30 MIN"
+- [x] Corrigir rodapé da grelha: texto limpo sem "slots"
+- [x] Revisão geral de textos, labels e elementos desnecessários ou quebrados
