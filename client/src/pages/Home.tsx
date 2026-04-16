@@ -70,10 +70,16 @@ export default function Home() {
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // ─── Dados ──────────────────────────────────────────────────────────────────
-  const { data: rawSlots = [], refetch } = trpc.prayer.list.useQuery(undefined, {
-    refetchInterval: 30_000,
-  });
-  const slots = rawSlots as PrayerSlot[];
+  const { data: rawSlots = [], refetch } = trpc.prayer.list.useQuery(
+    { myTokens: localTokens },
+    { refetchInterval: 30_000 }
+  );
+  // Mapear para PrayerSlot compatível: usar groupId como groupToken para agrupamento
+  const slots = useMemo(() => rawSlots.map(s => ({
+    ...s,
+    token: s.token ?? `__hidden_${s.id}`,
+    groupToken: s.groupToken ?? s.groupId ?? null,
+  })) as PrayerSlot[], [rawSlots]);
 
   const uniqueMinutes = useMemo(() => uniqueMinutesCovered(slots), [slots]);
   const remaining     = useMemo(() => minutesRemaining(slots), [slots]);
@@ -179,7 +185,8 @@ export default function Home() {
       const slot = slots.find(s => s.token === token);
       const gt = slot?.groupToken ?? null;
       if (gt) {
-        const groupTokens = slots.filter(s => s.groupToken === gt).map(s => s.token);
+        // Remover todos os tokens locais que pertencem ao mesmo grupo
+        const groupTokens = slots.filter(s => s.groupToken === gt && s.token).map(s => s.token);
         groupTokens.forEach(t => removeLocalToken(t));
       } else {
         removeLocalToken(token);

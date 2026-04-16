@@ -5,6 +5,19 @@ import type { TrpcContext } from "./context";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
+  // Security: Remover stack traces e informações internas dos erros em produção
+  errorFormatter({ shape, error }) {
+    return {
+      ...shape,
+      data: {
+        ...shape.data,
+        // Em produção, não expor stack traces nem caminhos de ficheiros
+        stack: process.env.NODE_ENV === "production" ? undefined : shape.data.stack,
+        // Manter o path para debugging em dev, remover em produção
+        path: process.env.NODE_ENV === "production" ? undefined : shape.data.path,
+      },
+    };
+  },
 });
 
 export const router = t.router;

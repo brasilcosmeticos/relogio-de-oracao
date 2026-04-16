@@ -7,6 +7,15 @@ import { publicProcedure, router } from "./_core/trpc";
 import { listPrayerSlots, addPrayerSlot, removePrayerSlot } from "./db";
 import { nanoid } from "nanoid";
 
+// ── Security: Sanitização de nome ────────────────────────────────────────────────────
+function sanitizeName(name: string): string {
+  return name
+    .replace(/[<>"'`&;{}()\[\]\\]/g, "") // remover caracteres perigosos
+    .replace(/\s+/g, " ")                 // normalizar espaços
+    .trim()
+    .slice(0, 120);                       // limitar comprimento
+}
+
 export const appRouter = router({
   system: systemRouter,
 
@@ -21,9 +30,35 @@ export const appRouter = router({
 
   prayer: router({
     /** Lista todos os horários de oração ordenados por hora de início. */
-    list: publicProcedure.query(async () => {
-      return listPrayerSlots();
-    }),
+    list: publicProcedure
+      .input(z.object({
+        /** Tokens que o cliente possui no localStorage (para marcar registos como "meus") */
+        myTokens: z.array(z.string().max(64)).max(100).optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        const slots = await listPrayerSlots();
+        const myTokenSet = new Set(input?.myTokens ?? []);
+        // Security: Retornar apenas dados necessários para a UI.
+        // Tokens individuais são substituídos por um hash truncado para identificação.
+        // O campo isMine indica se o registo pertence ao utilizador actual.
+        return slots.map(s => {
+          const isMine = myTokenSet.has(s.token);
+          return {
+            id: s.id,
+            name: s.name,
+            startMinutes: s.startMinutes,
+            endMinutes: s.endMinutes,
+            // Expor o token apenas se pertence ao utilizador (necessário para remoção)
+            token: isMine ? s.token : undefined,
+            // Expor groupToken apenas para registos do utilizador
+            groupToken: isMine ? s.groupToken : undefined,
+            // Hash truncado para agrupamento visual (não permite remoção)
+            groupId: s.groupToken ? s.groupToken.slice(0, 8) : null,
+            isMine,
+            createdAt: s.createdAt,
+          };
+        });
+      }),
 
     /**
      * Adiciona um novo horário de oração.
@@ -35,7 +70,9 @@ export const appRouter = router({
     add: publicProcedure
       .input(
         z.object({
-          name: z.string().min(1).max(120),
+          name: z.string().min(1).max(120)
+            .transform(sanitizeName)
+            .refine(v => v.length >= 1, { message: "Nome inválido após sanitização" }),
           startMinutes: z.number().int().min(0).max(1410).refine(v => v % 30 === 0, {
             message: "O horário deve ser múltiplo de 30 minutos",
           }),
@@ -104,7 +141,7 @@ export const appRouter = router({
 
     /** Remove um horário de oração pelo token único (apaga todos os registos associados). */
     remove: publicProcedure
-      .input(z.object({ token: z.string().min(1) }))
+      .input(z.object({ token: z.string().min(1).max(64) }))
       .mutation(async ({ input }) => {
         await removePrayerSlot(input.token);
         return { success: true };

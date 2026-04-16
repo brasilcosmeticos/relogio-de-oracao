@@ -75,3 +75,23 @@
 - [x] Lista de intercessores agrupada: registos com o mesmo groupToken mostrados como uma única entrada
 - [x] Contagem de participantes únicos (agrupados por groupToken)
 - [x] Testes Vitest actualizados: 50 testes passados (100% pass rate)
+
+## Auditoria de Segurança (v3.0)
+- [x] Análise completa de código-fonte: XSS, injeção SQL, CSRF, validação de entrada
+- [x] Auditoria de autenticação e autorização: OAuth, JWT, proteção de endpoints
+- [x] Verificar proteções contra DDoS: rate limiting, timeouts, validação de requisições
+- [x] Análise de dependências: procurar pacotes vulneráveis
+- [x] Implementar rate limiting no backend (express-rate-limit)
+- [x] Implementar headers de segurança (helmet)
+- [x] Sanitização de entrada no backend (nome, tokens)
+- [x] Proteger contra enumeração de tokens
+- [x] Limitar tamanho de payload nas requisições
+- [x] Adicionar CORS restritivo
+- [x] Testes de segurança com Vitest (16 testes passados)
+- [x] Actualizar axios para v1.15.0 (corrigir 2 vulnerabilidades CRÍTICAS)
+- [x] Remover stack traces em produção (onError handler tRPC)
+- [x] Relatório final de segurança
+- [x] Remover token/groupToken da resposta pública de prayer.list (expor flag isMine + groupId)
+- [x] Substituir CORS origin:true por allowlist explícita (regex: manus.space, manus.computer, localhost)
+- [x] Implementar errorFormatter tRPC para remover stacks em produção
+- [x] Criar relatório final de segurança no projecto (SECURITY_REPORT.md)
