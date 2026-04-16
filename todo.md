@@ -95,3 +95,8 @@
 - [x] Substituir CORS origin:true por allowlist explícita (regex: manus.space, manus.computer, localhost)
 - [x] Implementar errorFormatter tRPC para remover stacks em produção
 - [x] Criar relatório final de segurança no projecto (SECURITY_REPORT.md)
+
+## Limpeza de Testes (v3.1)
+- [x] Verificar e limpar dados de teste residuais na BD (nenhum resíduo encontrado)
+- [x] Ajustar testes Vitest para não escrever no BD real (vi.mock de todo o módulo db.ts)
+- [x] 76 testes passados (26 de segurança com mock, 49 prayerCalc, 1 auth)
